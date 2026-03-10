@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Knowledge Guide</title>
+
+<style>
+
+/* ===== GENERAL STYLE ===== */
+body{
+    margin:0;
+    font-family:Arial, sans-serif;
+    background:#0b0b0b;
+    color:white;
+}
+
+/* ===== NAVBAR ===== */
+nav{
+    background:#111;
+    padding:15px;
+    text-align:center;
+}
+
+nav a{
+    color:cyan;
+    margin:15px;
+    text-decoration:none;
+    font-weight:bold;
+}
+
+/* ===== HERO SECTION ===== */
+.hero{
+    text-align:center;
+    padding:60px 20px;
+}
+
+.hero img{
+    width:200px;
+    border-radius:15px;
+}
+
+/* ===== CARD SECTION ===== */
+.container{
+    display:flex;
+    flex-wrap:wrap;
+    justify-content:center;
+    gap:20px;
+    padding:20px;
+}
+
+.card{
+    background:#161616;
+    width:280px;
+    border-radius:12px;
+    padding:20px;
+    box-shadow:0 0 15px rgba(0,255,255,0.2);
+    text-align:center;
+}
+
+.card img{
+    width:100%;
+    border-radius:10px;
+}
+
+button{
+    background:cyan;
+    border:none;
+    padding:10px 15px;
+    margin-top:10px;
+    cursor:pointer;
+    font-weight:bold;
+}
+
+/* ===== FOOTER ===== */
+footer{
+    text-align:center;
+    padding:20px;
+    background:#111;
+    margin-top:30px;
+}
+
+</style>
+</head>
+
+<body>
+
+<!-- NAVBAR -->
+<nav>
+<a href="#">Home</a>
+<a href="#guides">Guides</a>
+<a href="#files">Premium Files</a>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+<h1>📘 Knowledge Guide</h1>
+<p>Learn Skills • Download Files • Upgrade Yourself</p>
+
+<img src="https://images.unsplash.com/photo-1519389950473-47ba0277781c">
+</section>
+
+<!-- GUIDES -->
+<h2 style="text-align:center;" id="guides">Free Knowledge Guides</h2>
+
+<div class="container">
+
+<div class="card">
+<img src="https://images.unsplash.com/photo-1518770660439-4636190af475">
+<h3>Learn Coding</h3>
+<p>Beginner guide for HTML, CSS & programming.</p>
+<button onclick="alert('Guide coming soon!')">Read Guide</button>
+</div>
+
+<div class="card">
+<img src="https://images.unsplash.com/photo-1498050108023-c5249f4df085">
+<h3>Termux Tutorials</h3>
+<p>Learn hacking-style coding using Termux.</p>
+<button onclick="alert('Guide coming soon!')">Read Guide</button>
+</div>
+
+</div>
+
+<!-- PREMIUM FILES -->
+<h2 style="text-align:center;" id="files">Premium Downloads</h2>
+
+<div class="container">
+
+<div class="card">
+<img src="https://images.unsplash.com/photo-1526378722484-bd91ca387e72">
+<h3>Programming Notes</h3>
+<p>Complete coding notes PDF.</p>
+<button onclick="buy()">Buy ₹99</button>
+</div>
+
+<div class="card">
+<img src="https://images.unsplash.com/photo-1555066931-4365d14bab8c">
+<h3>Website Templates</h3>
+<p>Premium website design pack.</p>
+<button onclick="buy()">Buy ₹149</button>
+</div>
+
+</div>
+
+<footer>
+<p>© 2026 Knowledge Guide | Created by You 🚀</p>
+</footer>
+
+<script>
+function buy(){
+    alert("Payment system will be added later (UPI / Razorpay)");
+}
+</script>
+
+</body>
+</html>
