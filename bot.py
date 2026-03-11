@@ -2,17 +2,15 @@ import telebot
 import yt_dlp
 import os
 import sqlite3
-import threading
 import time
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-TOKEN = "8769882137:AAGVvBrpI32V6z2tc5o28L8ybV2peJ_6mug"
+TOKEN = "8769882137:AAFACkzcXlGXVJA5ymMs4E7woW4DlEkBRww"
 ADMIN_ID = 8274612882
 
 bot = telebot.TeleBot(TOKEN)
 
-# ================= DATABASE =================
-
+# DATABASE
 conn = sqlite3.connect("users.db", check_same_thread=False)
 cursor = conn.cursor()
 
@@ -23,8 +21,7 @@ def save_user(user_id):
     cursor.execute("INSERT OR IGNORE INTO users VALUES(?)",(user_id,))
     conn.commit()
 
-# ================= START =================
-
+# START
 @bot.message_handler(commands=['start'])
 def start(message):
 
@@ -33,14 +30,13 @@ def start(message):
     bot.send_message(
         message.chat.id,
         "👋 Welcome to *Pankaj Downloader Bot*\n\n"
-        "Send any video link from:\n"
+        "Send video link from:\n"
         "YouTube\nInstagram\nTikTok\nFacebook\nTwitter\n\n"
-        "Then choose download quality.",
+        "Then choose quality.",
         parse_mode="Markdown"
     )
 
-# ================= LINK DETECTION =================
-
+# LINK DETECTION
 @bot.message_handler(func=lambda message: message.text and "http" in message.text.lower())
 def ask_quality(message):
 
@@ -67,14 +63,13 @@ def ask_quality(message):
         reply_markup=markup
     )
 
-# ================= DOWNLOAD =================
-
+# DOWNLOAD
 @bot.callback_query_handler(func=lambda call: True)
 def download(call):
 
     quality, url = call.data.split("|")
 
-    progress_msg = bot.send_message(call.message.chat.id,"⏳ Download starting...")
+    status = bot.send_message(call.message.chat.id,"⏳ Downloading...")
 
     try:
 
@@ -113,8 +108,6 @@ def download(call):
 
         size = os.path.getsize(filename)/(1024*1024)
 
-        # ===== SEND FILE =====
-
         if size < 50:
 
             with open(filename,'rb') as file:
@@ -128,8 +121,7 @@ def download(call):
 
             bot.send_message(
                 call.message.chat.id,
-                "📦 File larger than Telegram bot limit (50MB).\n\n"
-                "Download it here:\n"+url
+                "⚠️ File too large for Telegram (50MB limit).\n\nDownload from original link:\n"+url
             )
 
         os.remove(filename)
@@ -137,19 +129,18 @@ def download(call):
         bot.edit_message_text(
             "✅ Download completed!",
             call.message.chat.id,
-            progress_msg.message_id
+            status.message_id
         )
 
-    except Exception as e:
+    except:
 
         bot.edit_message_text(
-            "❌ Download failed.\nTry another link.",
+            "❌ Download failed. Try another link.",
             call.message.chat.id,
-            progress_msg.message_id
+            status.message_id
         )
 
-# ================= BROADCAST =================
-
+# BROADCAST
 @bot.message_handler(commands=['broadcast'])
 def broadcast(message):
 
@@ -170,8 +161,7 @@ def broadcast(message):
 
     bot.send_message(message.chat.id,"✅ Broadcast sent.")
 
-# ================= ADMIN REPLY =================
-
+# ADMIN REPLY
 @bot.message_handler(commands=['reply'])
 def reply_user(message):
 
@@ -193,8 +183,7 @@ def reply_user(message):
 
         bot.send_message(message.chat.id,"Usage:\n/reply USER_ID message")
 
-# ================= AUTO RESTART =================
-
+# AUTO RESTART
 while True:
     try:
         bot.infinity_polling(timeout=60,long_polling_timeout=60)
