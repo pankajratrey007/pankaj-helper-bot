@@ -4,7 +4,7 @@ import os
 import threading
 import time
 
-TOKEN = "8769882137:AAENSY3nUv-fE3beMDQpOCmxTaEg1ffeaYw"
+TOKEN = "8769882137:AAFACkzcXlGXVJA5ymMs4E7woW4DlEkBRww"
 
 bot = telebot.TeleBot(TOKEN)
 
@@ -13,22 +13,21 @@ download_queue = []
 # progress hook
 def progress_hook(d):
     if d['status'] == 'downloading':
-        percent = d.get('_percent_str', '').strip()
-        speed = d.get('_speed_str', '').strip()
-        eta = d.get('_eta_str', '').strip()
+        percent = d.get('_percent_str', '')
+        speed = d.get('_speed_str', '')
+        print(f"Downloading {percent} at {speed}")
 
-        print(f"Downloading {percent} at {speed} ETA {eta}")
-
-# worker thread
+# worker system
 def worker():
     while True:
         if download_queue:
             message = download_queue.pop(0)
-            process_download(message)
+            download_video(message)
         time.sleep(2)
 
 threading.Thread(target=worker, daemon=True).start()
 
+# start command
 @bot.message_handler(commands=['start'])
 def start(message):
 
@@ -41,13 +40,15 @@ def start(message):
         parse_mode="Markdown"
     )
 
+# detect links automatically
 @bot.message_handler(func=lambda m: m.text and "http" in m.text)
 def add_to_queue(message):
 
     bot.reply_to(message, "📥 Added to download queue...")
     download_queue.append(message)
 
-def process_download(message):
+# main download function
+def download_video(message):
 
     url = message.text
 
@@ -72,7 +73,7 @@ def process_download(message):
         if filesize > 49:
 
             bot.edit_message_text(
-                "⚠️ File too large for Telegram (limit ~50MB).\nTry a shorter video.",
+                "⚠️ File too large for Telegram (limit about 50MB).",
                 message.chat.id,
                 status.message_id
             )
@@ -92,7 +93,7 @@ def process_download(message):
 
         os.remove(filename)
 
-    except Exception as e:
+    except Exception:
 
         bot.edit_message_text(
             "❌ Download failed.\nVideo may be restricted or unsupported.",
