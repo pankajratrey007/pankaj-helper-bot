@@ -33,7 +33,7 @@ def start(message):
 
     bot.send_message(
         message.chat.id,
-        "👋 Welcome to *Pankaj Helper Bot*\n\nChoose an option below:",
+        "👋 Welcome to *Pankaj Helper Bot*\n\nSend a YouTube link anytime to download.",
         parse_mode="Markdown",
         reply_markup=markup
     )
@@ -43,45 +43,39 @@ def start(message):
 def callback_handler(call):
 
     if call.data == "ytvideo":
-
-        bot.send_message(call.message.chat.id,
-        "📥 Send a YouTube link to download video.")
+        bot.send_message(call.message.chat.id,"📥 Send YouTube link to download video.")
 
     elif call.data == "ytaudio":
-
-        bot.send_message(call.message.chat.id,
-        "🎧 Send a YouTube link to download MP3.")
+        bot.send_message(call.message.chat.id,"🎧 Send YouTube link to download MP3.")
 
     elif call.data == "insta":
-
-        bot.send_message(call.message.chat.id,
-        "📸 Instagram downloader coming soon.")
+        bot.send_message(call.message.chat.id,"📸 Instagram downloader coming soon.")
 
     elif call.data == "help":
-
         bot.send_message(call.message.chat.id,
-        "📜 Commands:\n\n"
-        "/start - open menu\n"
-        "/admin - admin panel\n"
-        "/users - user count\n"
+        "📜 Commands\n\n"
+        "/start\n"
+        "/admin\n"
+        "/users\n"
         "/broadcast message")
 
     elif call.data == "about":
-
         bot.send_message(call.message.chat.id,
-        "🤖 Pankaj Helper Bot\nCreated by Pankaj\nPowered by Python + Railway")
+        "🤖 Pankaj Helper Bot\nCreated by Pankaj\nRunning on Railway 🚂")
 
-# YOUTUBE VIDEO DOWNLOAD
-@bot.message_handler(func=lambda m: "youtu" in m.text)
+# YOUTUBE DOWNLOAD (MORE STABLE)
+@bot.message_handler(func=lambda m: "youtu" in m.text.lower())
 def download_video(message):
 
-    url = message.text
+    url = message.text.strip()
 
-    bot.reply_to(message, "⏳ Downloading video...")
+    bot.reply_to(message,"⏳ Processing video...")
 
     ydl_opts = {
-        'format': 'best',
-        'outtmpl': 'video.%(ext)s'
+        'format': 'best[filesize<50M]',
+        'noplaylist': True,
+        'outtmpl': 'video.%(ext)s',
+        'quiet': True
     }
 
     try:
@@ -92,13 +86,13 @@ def download_video(message):
 
             filename = ydl.prepare_filename(info)
 
-        video = open(filename, 'rb')
+        video = open(filename,'rb')
 
         bot.send_video(message.chat.id, video)
 
-    except:
+    except Exception as e:
 
-        bot.reply_to(message, "❌ Download failed.")
+        bot.reply_to(message,"❌ Download failed.\nVideo may be too large or restricted.")
 
 # ADMIN PANEL
 @bot.message_handler(commands=['admin'])
@@ -108,12 +102,12 @@ def admin(message):
 
         bot.reply_to(message,
         "🔧 Admin Panel\n\n"
-        "/users - user count\n"
+        "/users - show users\n"
         "/broadcast message")
 
     else:
 
-        bot.reply_to(message, "❌ You are not allowed.")
+        bot.reply_to(message,"❌ Not allowed")
 
 # USER COUNT
 @bot.message_handler(commands=['users'])
@@ -121,24 +115,23 @@ def user_count(message):
 
     if message.from_user.id == OWNER_ID:
 
-        bot.reply_to(message,
-        f"👥 Total users: {len(users)}")
+        bot.reply_to(message,f"👥 Total users: {len(users)}")
 
-# BROADCAST MESSAGE
+# BROADCAST
 @bot.message_handler(commands=['broadcast'])
 def broadcast(message):
 
     if message.from_user.id == OWNER_ID:
 
-        text = message.text.replace("/broadcast ", "")
+        text = message.text.replace("/broadcast ","")
 
         for user in users:
 
             try:
-                bot.send_message(user, text)
+                bot.send_message(user,text)
             except:
                 pass
 
-        bot.reply_to(message, "✅ Broadcast sent.")
+        bot.reply_to(message,"✅ Broadcast sent")
 
-bot.infinity_polling()
+bot.infinity_polling()l
