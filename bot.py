@@ -2,136 +2,79 @@ import telebot
 import yt_dlp
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-TOKEN = "8769882137:AAENSY3nUv-fE3beMDQpOCmxTaEg1ffeaYw"
+TOKEN = "8769882137:AAGVvBrpI32V6z2tc5o28L8ybV2peJ_6mug"
 OWNER_ID = 8274612882
 
 bot = telebot.TeleBot(TOKEN)
-
-users = set()
 
 # START MENU
 @bot.message_handler(commands=['start'])
 def start(message):
 
-    users.add(message.chat.id)
-
     markup = InlineKeyboardMarkup()
 
-    btn1 = InlineKeyboardButton("📥 YouTube Video", callback_data="ytvideo")
-    btn2 = InlineKeyboardButton("🎧 YouTube Audio", callback_data="ytaudio")
-    btn3 = InlineKeyboardButton("📸 Instagram", callback_data="insta")
-    btn4 = InlineKeyboardButton("📜 Help", callback_data="help")
-    btn5 = InlineKeyboardButton("🌐 Website", url="https://example.com")
-    btn6 = InlineKeyboardButton("💬 Support", url="https://t.me/yourusername")
-    btn7 = InlineKeyboardButton("ℹ️ About", callback_data="about")
+    btn1 = InlineKeyboardButton("📥 YouTube Download", callback_data="yt")
+    btn2 = InlineKeyboardButton("📸 Instagram Download", callback_data="insta")
+    btn3 = InlineKeyboardButton("🌐 Website", url="https://pankajratrey007.github.io/pankaj-helper-bot")
+    btn4 = InlineKeyboardButton("💬 Support", url="https://t.me/Pankajratrey007")
+    btn5 = InlineKeyboardButton("ℹ️ About", callback_data="about")
 
     markup.add(btn1, btn2)
     markup.add(btn3)
-    markup.add(btn4, btn7)
+    markup.add(btn4)
     markup.add(btn5)
-    markup.add(btn6)
 
     bot.send_message(
         message.chat.id,
-        "👋 Welcome to *Pankaj Helper Bot*\n\nSend a YouTube link anytime to download.",
+        "👋 Welcome to *Pankaj Helper Bot*\n\nChoose an option below.",
         parse_mode="Markdown",
         reply_markup=markup
     )
 
 # BUTTON HANDLER
 @bot.callback_query_handler(func=lambda call: True)
-def callback_handler(call):
+def callback(call):
 
-    if call.data == "ytvideo":
-        bot.send_message(call.message.chat.id,"📥 Send YouTube link to download video.")
-
-    elif call.data == "ytaudio":
-        bot.send_message(call.message.chat.id,"🎧 Send YouTube link to download MP3.")
+    if call.data == "yt":
+        bot.send_message(call.message.chat.id,"📥 Send a YouTube link to download.")
 
     elif call.data == "insta":
-        bot.send_message(call.message.chat.id,"📸 Instagram downloader coming soon.")
-
-    elif call.data == "help":
-        bot.send_message(call.message.chat.id,
-        "📜 Commands\n\n"
-        "/start\n"
-        "/admin\n"
-        "/users\n"
-        "/broadcast message")
+        bot.send_message(call.message.chat.id,"📸 Send an Instagram video link.")
 
     elif call.data == "about":
-        bot.send_message(call.message.chat.id,
-        "🤖 Pankaj Helper Bot\nCreated by Pankaj\nRunning on Railway 🚂")
+        bot.send_message(call.message.chat.id,"🤖 Pankaj Helper Bot\nCreated by Pankaj")
 
-# YOUTUBE DOWNLOAD (MORE STABLE)
+# YOUTUBE DOWNLOAD
 @bot.message_handler(func=lambda m: "youtu" in m.text.lower())
-def download_video(message):
+def yt_download(message):
 
-    url = message.text.strip()
+    url = message.text
 
-    bot.reply_to(message,"⏳ Processing video...")
+    bot.reply_to(message,"⏳ Downloading video...")
 
     ydl_opts = {
         'format': 'best[filesize<50M]',
-        'noplaylist': True,
-        'outtmpl': 'video.%(ext)s',
-        'quiet': True
+        'outtmpl': 'video.%(ext)s'
     }
 
     try:
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-
             info = ydl.extract_info(url, download=True)
-
             filename = ydl.prepare_filename(info)
 
         video = open(filename,'rb')
 
-        bot.send_video(message.chat.id, video)
+        bot.send_video(message.chat.id,video)
 
-    except Exception as e:
-
-        bot.reply_to(message,"❌ Download failed.\nVideo may be too large or restricted.")
+    except:
+        bot.reply_to(message,"❌ Download failed")
 
 # ADMIN PANEL
 @bot.message_handler(commands=['admin'])
 def admin(message):
 
     if message.from_user.id == OWNER_ID:
+        bot.reply_to(message,"✅ Admin panel active")
 
-        bot.reply_to(message,
-        "🔧 Admin Panel\n\n"
-        "/users - show users\n"
-        "/broadcast message")
-
-    else:
-
-        bot.reply_to(message,"❌ Not allowed")
-
-# USER COUNT
-@bot.message_handler(commands=['users'])
-def user_count(message):
-
-    if message.from_user.id == OWNER_ID:
-
-        bot.reply_to(message,f"👥 Total users: {len(users)}")
-
-# BROADCAST
-@bot.message_handler(commands=['broadcast'])
-def broadcast(message):
-
-    if message.from_user.id == OWNER_ID:
-
-        text = message.text.replace("/broadcast ","")
-
-        for user in users:
-
-            try:
-                bot.send_message(user,text)
-            except:
-                pass
-
-        bot.reply_to(message,"✅ Broadcast sent")
-
-bot.infinity_polling()l
+bot.infinity_polling()
