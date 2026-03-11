@@ -1,80 +1,107 @@
 import telebot
 import yt_dlp
+import time
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 TOKEN = "8769882137:AAGVvBrpI32V6z2tc5o28L8ybV2peJ_6mug"
-OWNER_ID = 8274612882
 
 bot = telebot.TeleBot(TOKEN)
 
-# START MENU
+last_request = {}
+
+# START
 @bot.message_handler(commands=['start'])
 def start(message):
-
-    markup = InlineKeyboardMarkup()
-
-    btn1 = InlineKeyboardButton("📥 YouTube Download", callback_data="yt")
-    btn2 = InlineKeyboardButton("📸 Instagram Download", callback_data="insta")
-    btn3 = InlineKeyboardButton("🌐 Website", url="https://pankajratrey007.github.io/pankaj-helper-bot")
-    btn4 = InlineKeyboardButton("💬 Support", url="https://t.me/Pankajratrey007")
-    btn5 = InlineKeyboardButton("ℹ️ About", callback_data="about")
-
-    markup.add(btn1, btn2)
-    markup.add(btn3)
-    markup.add(btn4)
-    markup.add(btn5)
-
     bot.send_message(
         message.chat.id,
-        "👋 Welcome to *Pankaj Helper Bot*\n\nChoose an option below.",
-        parse_mode="Markdown",
-        reply_markup=markup
+        "👋 Welcome to *Pankaj Helper Bot*\n\n"
+        "Send a video link from:\n"
+        "YouTube / Instagram / TikTok / Facebook\n\n"
+        "Then choose download quality.",
+        parse_mode="Markdown"
     )
 
-# BUTTON HANDLER
-@bot.callback_query_handler(func=lambda call: True)
-def callback(call):
+# LINK DETECTION
+@bot.message_handler(func=lambda m: "http" in m.text)
+def ask_quality(message):
 
-    if call.data == "yt":
-        bot.send_message(call.message.chat.id,"📥 Send a YouTube link to download.")
+    user = message.from_user.id
 
-    elif call.data == "insta":
-        bot.send_message(call.message.chat.id,"📸 Send an Instagram video link.")
+    # simple anti spam
+    if user in last_request and time.time() - last_request[user] < 5:
+        bot.reply_to(message, "⏳ Please wait a few seconds before another request.")
+        return
 
-    elif call.data == "about":
-        bot.send_message(call.message.chat.id,"🤖 Pankaj Helper Bot\nCreated by Pankaj")
-
-# YOUTUBE DOWNLOAD
-@bot.message_handler(func=lambda m: "youtu" in m.text.lower())
-def yt_download(message):
+    last_request[user] = time.time()
 
     url = message.text
 
-    bot.reply_to(message,"⏳ Downloading video...")
+    markup = InlineKeyboardMarkup()
 
-    ydl_opts = {
-        'format': 'best[filesize<50M]',
-        'outtmpl': 'video.%(ext)s'
-    }
+    btn1 = InlineKeyboardButton("📹 360p", callback_data=f"360|{url}")
+    btn2 = InlineKeyboardButton("🎬 720p", callback_data=f"720|{url}")
+    btn3 = InlineKeyboardButton("🎧 MP3", callback_data=f"audio|{url}")
+
+    markup.add(btn1, btn2)
+    markup.add(btn3)
+
+    bot.send_message(
+        message.chat.id,
+        "📥 Choose download quality:",
+        reply_markup=markup
+    )
+
+# DOWNLOAD SYSTEM
+@bot.callback_query_handler(func=lambda call: True)
+def download(call):
+
+    quality, url = call.data.split("|")
+
+    bot.send_message(call.message.chat.id, "⏳ Download started...")
 
     try:
 
+        if quality == "audio":
+
+            ydl_opts = {
+                'format': 'bestaudio',
+                'outtmpl': 'audio.%(ext)s'
+            }
+
+        elif quality == "360":
+
+            ydl_opts = {
+                'format': 'bestvideo[height<=360]+bestaudio/best',
+                'outtmpl': 'video.%(ext)s'
+            }
+
+        else:
+
+            ydl_opts = {
+                'format': 'bestvideo[height<=720]+bestaudio/best',
+                'outtmpl': 'video.%(ext)s'
+            }
+
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+
             info = ydl.extract_info(url, download=True)
+
             filename = ydl.prepare_filename(info)
 
-        video = open(filename,'rb')
+        file = open(filename, "rb")
 
-        bot.send_video(message.chat.id,video)
+        if quality == "audio":
+            bot.send_audio(call.message.chat.id, file)
+        else:
+            bot.send_video(call.message.chat.id, file)
 
-    except:
-        bot.reply_to(message,"❌ Download failed")
+        bot.send_message(call.message.chat.id, "✅ Download complete!")
 
-# ADMIN PANEL
-@bot.message_handler(commands=['admin'])
-def admin(message):
+    except Exception as e:
 
-    if message.from_user.id == OWNER_ID:
-        bot.reply_to(message,"✅ Admin panel active")
+        bot.send_message(
+            call.message.chat.id,
+            "❌ Download failed.\nFile may be too large or restricted."
+        )
 
 bot.infinity_polling()
