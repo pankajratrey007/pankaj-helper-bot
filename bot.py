@@ -17,18 +17,23 @@ def start(message):
 
     markup = InlineKeyboardMarkup()
 
-    btn1 = InlineKeyboardButton("📥 Download Video", callback_data="video")
-    btn2 = InlineKeyboardButton("🎧 Download Audio", callback_data="audio")
-    btn3 = InlineKeyboardButton("📜 Help", callback_data="help")
-    btn4 = InlineKeyboardButton("ℹ️ About", callback_data="about")
+    btn1 = InlineKeyboardButton("📥 YouTube Video", callback_data="ytvideo")
+    btn2 = InlineKeyboardButton("🎧 YouTube Audio", callback_data="ytaudio")
+    btn3 = InlineKeyboardButton("📸 Instagram", callback_data="insta")
+    btn4 = InlineKeyboardButton("📜 Help", callback_data="help")
+    btn5 = InlineKeyboardButton("🌐 Website", url="https://example.com")
+    btn6 = InlineKeyboardButton("💬 Support", url="https://t.me/yourusername")
+    btn7 = InlineKeyboardButton("ℹ️ About", callback_data="about")
 
-    markup.add(btn1)
-    markup.add(btn2)
-    markup.add(btn3, btn4)
+    markup.add(btn1, btn2)
+    markup.add(btn3)
+    markup.add(btn4, btn7)
+    markup.add(btn5)
+    markup.add(btn6)
 
     bot.send_message(
         message.chat.id,
-        "👋 Welcome to *Pankaj Helper Bot*\n\nSend a YouTube link to download.",
+        "👋 Welcome to *Pankaj Helper Bot*\n\nChoose an option below:",
         parse_mode="Markdown",
         reply_markup=markup
     )
@@ -37,25 +42,34 @@ def start(message):
 @bot.callback_query_handler(func=lambda call: True)
 def callback_handler(call):
 
-    if call.data == "video":
+    if call.data == "ytvideo":
 
         bot.send_message(call.message.chat.id,
         "📥 Send a YouTube link to download video.")
 
-    elif call.data == "audio":
+    elif call.data == "ytaudio":
 
         bot.send_message(call.message.chat.id,
         "🎧 Send a YouTube link to download MP3.")
 
+    elif call.data == "insta":
+
+        bot.send_message(call.message.chat.id,
+        "📸 Instagram downloader coming soon.")
+
     elif call.data == "help":
 
         bot.send_message(call.message.chat.id,
-        "📜 Commands:\n/start\n/admin\n/broadcast\n/users")
+        "📜 Commands:\n\n"
+        "/start - open menu\n"
+        "/admin - admin panel\n"
+        "/users - user count\n"
+        "/broadcast message")
 
     elif call.data == "about":
 
         bot.send_message(call.message.chat.id,
-        "🤖 Pankaj Helper Bot\nCreated by Pankaj")
+        "🤖 Pankaj Helper Bot\nCreated by Pankaj\nPowered by Python + Railway")
 
 # YOUTUBE VIDEO DOWNLOAD
 @bot.message_handler(func=lambda m: "youtu" in m.text)
@@ -97,6 +111,10 @@ def admin(message):
         "/users - user count\n"
         "/broadcast message")
 
+    else:
+
+        bot.reply_to(message, "❌ You are not allowed.")
+
 # USER COUNT
 @bot.message_handler(commands=['users'])
 def user_count(message):
@@ -117,13 +135,10 @@ def broadcast(message):
         for user in users:
 
             try:
-
                 bot.send_message(user, text)
-
             except:
-
                 pass
 
-        bot.reply_to(message, "✅ Message sent.")
+        bot.reply_to(message, "✅ Broadcast sent.")
 
 bot.infinity_polling()
