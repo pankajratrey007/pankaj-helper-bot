@@ -102,3 +102,36 @@ def download_video(message):
         )
 
 bot.infinity_polling()
+# ===== ADMIN SETTINGS =====
+ADMIN_ID = 8274612882
+
+# ===== FORWARD USER MESSAGES TO ADMIN =====
+@bot.message_handler(func=lambda message: True)
+def forward_to_admin(message):
+
+    user_id = message.from_user.id
+    username = message.from_user.username
+
+    bot.forward_message(
+        ADMIN_ID,
+        message.chat.id,
+        message.message_id
+    )
+
+    bot.send_message(
+        ADMIN_ID,
+        f"👤 New message from user\n\nUser ID: {user_id}\nUsername: @{username}"
+    )
+
+# ===== ADMIN REPLY SYSTEM =====
+@bot.message_handler(func=lambda message: message.chat.id == ADMIN_ID and message.reply_to_message)
+def reply_to_user(message):
+
+    try:
+        text = message.reply_to_message.text
+        user_id = int(text.split("User ID: ")[1].split("\n")[0])
+
+        bot.send_message(user_id, message.text)
+
+    except:
+        bot.send_message(ADMIN_ID, "❌ Reply failed")
