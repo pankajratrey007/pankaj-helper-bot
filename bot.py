@@ -2,6 +2,8 @@ import telebot
 import yt_dlp
 import os
 import sqlite3
+import threading
+import time
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 TOKEN = "8769882137:AAGVvBrpI32V6z2tc5o28L8ybV2peJ_6mug"
@@ -9,19 +11,20 @@ ADMIN_ID = 8274612882
 
 bot = telebot.TeleBot(TOKEN)
 
-# DATABASE
+# ================= DATABASE =================
+
 conn = sqlite3.connect("users.db", check_same_thread=False)
 cursor = conn.cursor()
 
 cursor.execute("CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY)")
 conn.commit()
 
-# SAVE USER
 def save_user(user_id):
     cursor.execute("INSERT OR IGNORE INTO users VALUES(?)",(user_id,))
     conn.commit()
 
-# START COMMAND
+# ================= START =================
+
 @bot.message_handler(commands=['start'])
 def start(message):
 
@@ -29,13 +32,15 @@ def start(message):
 
     bot.send_message(
         message.chat.id,
-        "👋 Welcome to Pankaj Downloader Bot\n\n"
+        "👋 Welcome to *Pankaj Downloader Bot*\n\n"
         "Send any video link from:\n"
         "YouTube\nInstagram\nTikTok\nFacebook\nTwitter\n\n"
-        "Then choose download quality."
+        "Then choose download quality.",
+        parse_mode="Markdown"
     )
 
-# USER SEND LINK
+# ================= LINK DETECTION =================
+
 @bot.message_handler(func=lambda message: message.text and "http" in message.text.lower())
 def ask_quality(message):
 
@@ -58,17 +63,18 @@ def ask_quality(message):
 
     bot.send_message(
         message.chat.id,
-        "Choose download quality:",
+        "🎬 Choose download quality:",
         reply_markup=markup
     )
 
-# DOWNLOAD
+# ================= DOWNLOAD =================
+
 @bot.callback_query_handler(func=lambda call: True)
 def download(call):
 
     quality, url = call.data.split("|")
 
-    msg = bot.send_message(call.message.chat.id,"⏳ Downloading...")
+    progress_msg = bot.send_message(call.message.chat.id,"⏳ Download starting...")
 
     try:
 
@@ -103,10 +109,11 @@ def download(call):
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
 
             info = ydl.extract_info(url, download=True)
-
             filename = ydl.prepare_filename(info)
 
         size = os.path.getsize(filename)/(1024*1024)
+
+        # ===== SEND FILE =====
 
         if size < 50:
 
@@ -121,26 +128,28 @@ def download(call):
 
             bot.send_message(
                 call.message.chat.id,
-                "⚠️ File too large for Telegram.\nDownload from original link:\n"+url
+                "📦 File larger than Telegram bot limit (50MB).\n\n"
+                "Download it here:\n"+url
             )
 
         os.remove(filename)
 
         bot.edit_message_text(
-            "✅ Download complete",
+            "✅ Download completed!",
             call.message.chat.id,
-            msg.message_id
+            progress_msg.message_id
         )
 
     except Exception as e:
 
         bot.edit_message_text(
-            "❌ Download failed. Try another link.",
+            "❌ Download failed.\nTry another link.",
             call.message.chat.id,
-            msg.message_id
+            progress_msg.message_id
         )
 
-# BROADCAST
+# ================= BROADCAST =================
+
 @bot.message_handler(commands=['broadcast'])
 def broadcast(message):
 
@@ -161,9 +170,34 @@ def broadcast(message):
 
     bot.send_message(message.chat.id,"✅ Broadcast sent.")
 
-# AUTO RESTART (fix bot stop problem)
+# ================= ADMIN REPLY =================
+
+@bot.message_handler(commands=['reply'])
+def reply_user(message):
+
+    if message.chat.id != ADMIN_ID:
+        return
+
+    try:
+
+        parts = message.text.split(" ",2)
+
+        user_id = int(parts[1])
+        text = parts[2]
+
+        bot.send_message(user_id,text)
+
+        bot.send_message(message.chat.id,"✅ Message sent.")
+
+    except:
+
+        bot.send_message(message.chat.id,"Usage:\n/reply USER_ID message")
+
+# ================= AUTO RESTART =================
+
 while True:
     try:
         bot.infinity_polling(timeout=60,long_polling_timeout=60)
     except Exception as e:
         print("Bot crashed, restarting...")
+        time.sleep(5)
