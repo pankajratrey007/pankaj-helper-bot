@@ -13,55 +13,50 @@ def start(message):
 
     markup = InlineKeyboardMarkup()
 
-    btn1 = InlineKeyboardButton("📜 Help", callback_data="help")
-    btn2 = InlineKeyboardButton("📥 YouTube Download", callback_data="download")
-    btn3 = InlineKeyboardButton("ℹ️ About", callback_data="about")
+    help_btn = InlineKeyboardButton("📜 Help", callback_data="help")
+    download_btn = InlineKeyboardButton("📥 Download YouTube", callback_data="download")
+    about_btn = InlineKeyboardButton("ℹ️ About", callback_data="about")
 
-    markup.add(btn1)
-    markup.add(btn2)
-    markup.add(btn3)
+    markup.add(help_btn)
+    markup.add(download_btn)
+    markup.add(about_btn)
 
     bot.send_message(
         message.chat.id,
-        "👋 Welcome to Pankaj Helper Bot\n\nSend a YouTube link to download video 🎬",
+        "👋 Welcome to *Pankaj Helper Bot*\n\nSend a YouTube link to download 🎬",
+        parse_mode="Markdown",
         reply_markup=markup
     )
 
-# HELP BUTTON
-@bot.callback_query_handler(func=lambda call: call.data == "help")
-def help_menu(call):
+# BUTTON HANDLER
+@bot.callback_query_handler(func=lambda call: True)
+def callback_handler(call):
 
-    bot.edit_message_text(
-        "📜 Commands:\n\n"
-        "/start - Start bot\n"
-        "/admin - Admin panel\n\n"
-        "Simply send a YouTube link to download the video.",
-        call.message.chat.id,
-        call.message.message_id
-    )
+    if call.data == "help":
 
-# ABOUT BUTTON
-@bot.callback_query_handler(func=lambda call: call.data == "about")
-def about(call):
+        bot.send_message(
+            call.message.chat.id,
+            "📜 Commands:\n\n"
+            "/start - Open menu\n"
+            "/admin - Admin panel\n\n"
+            "Send a YouTube link to download video."
+        )
 
-    bot.edit_message_text(
-        "🤖 Pankaj Helper Bot\n"
-        "Created by Pankaj\n"
-        "Hosted on Railway 🚂",
-        call.message.chat.id,
-        call.message.message_id
-    )
+    elif call.data == "download":
 
-# DOWNLOAD BUTTON
-@bot.callback_query_handler(func=lambda call: call.data == "download")
-def download_info(call):
+        bot.send_message(
+            call.message.chat.id,
+            "📥 Send a YouTube video link and I will download it."
+        )
 
-    bot.send_message(
-        call.message.chat.id,
-        "📥 Send a YouTube video link and I will download it for you."
-    )
+    elif call.data == "about":
 
-# YOUTUBE LINK DETECTOR
+        bot.send_message(
+            call.message.chat.id,
+            "🤖 Pankaj Helper Bot\nCreated by Pankaj\nHosted on Railway 🚂"
+        )
+
+# YOUTUBE DOWNLOAD
 @bot.message_handler(func=lambda m: "youtu" in m.text)
 def download_video(message):
 
@@ -82,7 +77,7 @@ def download_video(message):
         video = open(filename, 'rb')
         bot.send_video(message.chat.id, video)
 
-    except:
+    except Exception as e:
         bot.reply_to(message, "❌ Failed to download video.")
 
 # ADMIN PANEL
@@ -90,8 +85,15 @@ def download_video(message):
 def admin(message):
 
     if message.from_user.id == OWNER_ID:
-        bot.reply_to(message, "🔧 Admin panel active.\nYou control the bot.")
+
+        bot.reply_to(
+            message,
+            "🔧 Admin Panel\n\n"
+            "Bot is running correctly ✅"
+        )
+
     else:
+
         bot.reply_to(message, "❌ You are not allowed.")
 
 bot.infinity_polling()
