@@ -1,7 +1,6 @@
 # ======================================
 # BOT CONFIG
 # ======================================
-
 TOKEN = "8769882137:AAFACkzcXlGXVJA5ymMs4E7woW4DlEkBRww"
 ADMIN_ID = 8274612882
 
@@ -11,11 +10,13 @@ API_LIST = [
 ]
 
 MAX_THREADS_PER_USER = 2
-FILE_EXPIRY = 3600
+MAX_WORKERS = 3
+FILE_EXPIRY = 3600  # seconds
+TEMP_DIR = "/tmp"
+MAX_RETRIES = 3
 
 # ======================================
-
-import telebot, yt_dlp, sqlite3, threading, os, subprocess, time, requests, random
+import telebot, yt_dlp, sqlite3, threading, os, subprocess, time, requests, random, json
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram import Client
 from queue import Queue
@@ -31,9 +32,12 @@ bot = telebot.TeleBot(TOKEN)
 # -------------------------
 uploaders = []
 for idx, api in enumerate(API_LIST):
-    uploaders.append(Client(f"uploader{idx+1}", bot_token=TOKEN, api_id=api["api_id"], api_hash=api["api_hash"]))
-for u in uploaders:
-    u.start()
+    try:
+        uploader = Client(f"uploader{idx+1}", bot_token=TOKEN, api_id=api["api_id"], api_hash=api["api_hash"])
+        uploader.start()
+        uploaders.append(uploader)
+    except Exception as e:
+        print(f"Uploader {idx+1} failed: {e}")
 
 # -------------------------
 # DATABASE
@@ -41,19 +45,58 @@ for u in uploaders:
 conn = sqlite3.connect("users.db", check_same_thread=False)
 cursor = conn.cursor()
 cursor.execute("CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY)")
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS downloads(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    url TEXT,
+    title TEXT,
+    file TEXT,
+    status TEXT,
+    timestamp TEXT
+)
+""")
 conn.commit()
+
 def save_user(uid):
-    cursor.execute("INSERT OR IGNORE INTO users VALUES(?)", (uid,))
-    conn.commit()
+    try:
+        cursor.execute("INSERT OR IGNORE INTO users VALUES(?)", (uid,))
+        conn.commit()
+    except Exception as e:
+        print(f"DB save error: {e}")
+
+def log_download(user_id, url, title, file, status):
+    try:
+        cursor.execute("INSERT INTO downloads(user_id, url, title, file, status, timestamp) VALUES(?,?,?,?,?,?)",
+                       (user_id, url, title, file, status, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+        conn.commit()
+    except Exception as e:
+        print(f"History log error: {e}")
+
+# -------------------------
+# FAILED DOWNLOADS FILE
+# -------------------------
+FAILED_FILE = os.path.join(TEMP_DIR, "failed_downloads.json")
+if os.path.exists(FAILED_FILE):
+    with open(FAILED_FILE, "r") as f:
+        failed_queue = json.load(f)
+else:
+    failed_queue = []
+
+def save_failed_queue():
+    with open(FAILED_FILE, "w") as f:
+        json.dump(failed_queue, f)
 
 # -------------------------
 # QUEUE & THREADS
 # -------------------------
 queue = Queue()
-MAX_WORKERS = 5
 user_threads = {}
-failed_uploads = []
-live_progress = {}  # <user_id>: {"title":..., "percent":..., "speed":..., "eta":...}
+live_progress = {}
+
+# Re-add failed downloads on bot restart
+for item in failed_queue:
+    queue.put(tuple(item))
 
 # -------------------------
 # START COMMAND
@@ -68,7 +111,7 @@ def start(m):
     )
 
 # -------------------------
-# ADMIN USERS
+# ADMIN COMMANDS
 # -------------------------
 @bot.message_handler(commands=['users'])
 def users(m):
@@ -77,8 +120,77 @@ def users(m):
         count = cursor.fetchone()[0]
         bot.send_message(m.chat.id, f"👤 Total users: {count}")
 
+@bot.message_handler(commands=['dashboard'])
+def dashboard(m):
+    if m.chat.id != ADMIN_ID:
+        bot.reply_to(m, "❌ Not authorized")
+        return
+    cursor.execute("SELECT COUNT(*) FROM users")
+    total_users = cursor.fetchone()[0]
+    qsize = queue.qsize()
+    active_threads = sum(user_threads.values())
+
+    msg_text = f"📊 Admin Dashboard\n\n👤 Total Users: {total_users}\n📥 Queue Size: {qsize}\n⚡ Active Threads: {active_threads}\n\n💻 Live Downloads:\n"
+    if live_progress:
+        for uid, info in live_progress.items():
+            msg_text += f"• {uid}: {info['title']} {info['percent']} | Speed: {info['speed']} | ETA: {info['eta']}\n"
+    else:
+        msg_text += "No active downloads."
+    bot.send_message(m.chat.id, msg_text)
+
+@bot.message_handler(commands=['reply'])
+def admin_reply(m):
+    if m.chat.id != ADMIN_ID:
+        return
+    try:
+        parts = m.text.split(" ", 2)
+        target_id = int(parts[1])
+        reply_text = parts[2]
+        bot.send_message(target_id, f"💬 Admin: {reply_text}")
+        bot.reply_to(m, f"✅ Sent to {target_id}")
+    except:
+        bot.reply_to(m, "⚠️ Usage: /reply <user_id> <message>")
+
 # -------------------------
-# MESSAGE LOGGING & AUTO-REPLY
+# DOWNLOAD HISTORY COMMANDS
+# -------------------------
+@bot.message_handler(commands=['history'])
+def history(m):
+    if m.chat.id != ADMIN_ID:
+        bot.reply_to(m, "❌ Not authorized")
+        return
+    cursor.execute("SELECT id, user_id, title, status, timestamp FROM downloads ORDER BY id DESC LIMIT 20")
+    rows = cursor.fetchall()
+    if not rows:
+        bot.send_message(m.chat.id, "No download history found.")
+        return
+    msg = "📜 Last 20 Downloads:\n\n"
+    for r in rows:
+        msg += f"ID:{r[0]} | User:{r[1]} | {r[2]} | Status:{r[3]} | {r[4]}\n"
+    msg += "\nUse /retry <ID> to re-download."
+    bot.send_message(m.chat.id, msg)
+
+@bot.message_handler(commands=['retry'])
+def retry(m):
+    if m.chat.id != ADMIN_ID:
+        return
+    try:
+        parts = m.text.split(" ", 1)
+        dl_id = int(parts[1])
+        cursor.execute("SELECT user_id, url, title FROM downloads WHERE id=?", (dl_id,))
+        row = cursor.fetchone()
+        if not row:
+            bot.reply_to(m, "❌ Download ID not found")
+            return
+        user_id, url, title = row
+        queue.put((user_id, url, "best", 0))
+        bot.reply_to(m, f"♻️ Retry added for {title} (User {user_id})")
+    except Exception as e:
+        print(f"Retry error: {e}")
+        bot.reply_to(m, "⚠️ Usage: /retry <download_id>")
+
+# -------------------------
+# MESSAGE LOGGING
 # -------------------------
 @bot.message_handler(func=lambda m: True)
 def log_all_messages(m):
@@ -94,7 +206,7 @@ def log_all_messages(m):
 def link(m):
     threads = user_threads.get(m.chat.id, 0)
     if threads >= MAX_THREADS_PER_USER:
-        bot.reply_to(m, "⚠️ You already have max downloads running. Please wait.")
+        bot.reply_to(m, "⚠️ Max downloads running. Wait.")
         return
     url = m.text.strip()
     kb = InlineKeyboardMarkup()
@@ -113,47 +225,56 @@ def link(m):
 # -------------------------
 @bot.callback_query_handler(func=lambda c: True)
 def cb(c):
-    quality, url = c.data.split("|")
-    queue.put((c.message.chat.id, url, quality))
-    user_threads[c.message.chat.id] = user_threads.get(c.message.chat.id, 0) + 1
-    pos = queue.qsize()
-    bot.send_message(c.message.chat.id, f"📥 Added to queue\nPosition: {pos}")
+    try:
+        quality, url = c.data.split("|")
+        queue.put((c.message.chat.id, url, quality, 0))  # retries = 0
+        user_threads[c.message.chat.id] = user_threads.get(c.message.chat.id, 0) + 1
+        bot.send_message(c.message.chat.id, f"📥 Added to queue (position: {queue.qsize()})")
+    except Exception as e:
+        print(f"Callback error: {e}")
 
 # -------------------------
 # WORKER THREADS
 # -------------------------
 def worker():
     while True:
-        chat, url, q = queue.get()
+        chat, url, q, retries = queue.get()
         try:
-            process(chat, url, q)
+            process(chat, url, q, retries)
         except Exception as e:
-            bot.send_message(chat, f"❌ Error: {e}")
+            print(f"Worker error: {e}")
+            if retries < MAX_RETRIES:
+                queue.put((chat, url, q, retries+1))
+                bot.send_message(chat, f"⚠️ Retry {retries+1} due to error...")
+            else:
+                bot.send_message(chat, f"❌ Failed after {MAX_RETRIES} retries. Will resume on bot restart.")
+                failed_queue.append([chat, url, q, 0])
+                save_failed_queue()
         user_threads[chat] = max(user_threads.get(chat, 1) - 1, 0)
-        if chat in live_progress:
-            live_progress.pop(chat)
+        live_progress.pop(chat, None)
         queue.task_done()
 
 for i in range(MAX_WORKERS):
     threading.Thread(target=worker, daemon=True).start()
 
 # -------------------------
-# DOWNLOAD FUNCTION WITH LIVE PROGRESS
+# DOWNLOAD FUNCTION WITH HISTORY & AUTO-RESUME
 # -------------------------
 def safe_send(uploader, chat, file, caption, thumb=None):
     try:
         uploader.send_document(chat, file, caption=caption, thumb=thumb)
         return True
     except:
-        failed_uploads.append({"chat": chat, "file": file})
         return False
 
-def process(chat, url, q):
+def process(chat, url, q, retries=0):
     msg = bot.send_message(chat, "⏳ Download starting...")
     format_map = {"360": "18", "720": "22", "1080": "bestvideo+bestaudio", "mp3": "bestaudio"}
+    last_edit = 0
 
     def progress(d):
-        if d["status"] == "downloading":
+        nonlocal last_edit
+        if d["status"] == "downloading" and time.time() - last_edit > 2:
             live_progress[chat] = {
                 "title": d.get("filename", "Downloading"),
                 "percent": d.get("_percent_str", ""),
@@ -161,16 +282,18 @@ def process(chat, url, q):
                 "eta": d.get("_eta_str", "")
             }
             try:
-                bot.edit_message_text(f"⬇️ {live_progress[chat]['percent']}\nSpeed: {live_progress[chat]['speed']}\nETA: {live_progress[chat]['eta']}", chat, msg.message_id)
+                bot.edit_message_text(f"⬇️ {live_progress[chat]['percent']} | Speed: {live_progress[chat]['speed']} | ETA: {live_progress[chat]['eta']}", chat, msg.message_id)
             except: pass
+            last_edit = time.time()
 
     ydl_opts = {
         "format": format_map.get(q, "best"),
-        "outtmpl": "%(title)s.%(ext)s",
+        "outtmpl": os.path.join(TEMP_DIR, "%(title)s.%(ext)s"),
         "retries": 10,
         "fragment_retries": 10,
         "quiet": True,
         "progress_hooks": [progress],
+        "continuedl": True,
         "http_headers": {"User-Agent": "Mozilla/5.0"},
     }
 
@@ -183,7 +306,7 @@ def process(chat, url, q):
 
     thumb_file = None
     if thumb:
-        thumb_file = "thumb.jpg"
+        thumb_file = os.path.join(TEMP_DIR, "thumb.jpg")
         r = requests.get(thumb)
         with open(thumb_file, "wb") as f:
             f.write(r.content)
@@ -192,32 +315,35 @@ def process(chat, url, q):
     caption = f"📥 {title}\n📏 Size: {round(size/1024/1024,2)} MB\n⏱ Duration: {duration} sec"
     uploader = uploaders[-1] if size > 1500000000 else random.choice(uploaders)
 
-    # Split large files (>2GB)
-    if size > 1900000000:
-        subprocess.call([
-            "ffmpeg", "-i", file, "-c", "copy", "-map", "0",
-            "-f", "segment", "-segment_time", "600", "part_%03d.mp4"
-        ])
-        for f in os.listdir():
-            if f.startswith("part_"):
-                if not safe_send(uploader, chat, f, caption, thumb_file):
-                    for u in uploaders:
-                        if safe_send(u, chat, f, caption, thumb_file):
-                            break
-                os.remove(f)
-    else:
-        if not safe_send(uploader, chat, file, caption, thumb_file):
-            for u in uploaders:
-                if safe_send(u, chat, file, caption, thumb_file):
-                    break
+    try:
+        # Split large files safely
+        if size > 1900000000:
+            subprocess.call([
+                "ffmpeg", "-i", file, "-c", "copy", "-map", "0",
+                "-f", "segment", "-segment_time", "600", os.path.join(TEMP_DIR, "part_%03d.mp4")
+            ])
+            for f in os.listdir(TEMP_DIR):
+                if f.startswith("part_"):
+                    fpath = os.path.join(TEMP_DIR, f)
+                    if not safe_send(uploader, chat, fpath, caption, thumb_file):
+                        for u in uploaders:
+                            if safe_send(u, chat, fpath, caption, thumb_file):
+                                break
+                    os.remove(fpath)
+        else:
+            if not safe_send(uploader, chat, file, caption, thumb_file):
+                for u in uploaders:
+                    if safe_send(u, chat, file, caption, thumb_file):
+                        break
+        log_download(chat, url, title, file, "Completed")
+    except Exception as e:
+        log_download(chat, url, title, file, "Failed")
+        print(f"Error sending: {e}")
 
-    os.remove(file)
-    if thumb_file and os.path.exists(thumb_file):
-        os.remove(thumb_file)
-
+    if os.path.exists(file): os.remove(file)
+    if thumb_file and os.path.exists(thumb_file): os.remove(thumb_file)
     bot.edit_message_text("✅ Download finished", chat, msg.message_id)
-    if chat in live_progress:
-        live_progress.pop(chat)
+    live_progress.pop(chat, None)
 
 # -------------------------
 # AUTO-CLEANUP THREAD
@@ -225,70 +351,17 @@ def process(chat, url, q):
 def cleanup_thread():
     while True:
         now = time.time()
-        for f in os.listdir():
+        for f in os.listdir(TEMP_DIR):
             if f.endswith((".mp4", ".mp3")):
-                if now - os.path.getctime(f) > FILE_EXPIRY:
-                    os.remove(f)
+                fpath = os.path.join(TEMP_DIR, f)
+                if now - os.path.getctime(fpath) > FILE_EXPIRY:
+                    os.remove(fpath)
         time.sleep(300)
 
 threading.Thread(target=cleanup_thread, daemon=True).start()
 
 # -------------------------
-# ADMIN DASHBOARD WITH LIVE PROGRESS
-# -------------------------
-@bot.message_handler(commands=['dashboard'])
-def dashboard(m):
-    if m.chat.id != ADMIN_ID:
-        bot.reply_to(m, "❌ You are not authorized")
-        return
-
-    cursor.execute("SELECT COUNT(*) FROM users")
-    total_users = cursor.fetchone()[0]
-    qsize = queue.qsize()
-    active_threads = sum(user_threads.values())
-    failed_count = len(failed_uploads)
-
-    msg_text = (
-        f"📊 Admin Dashboard\n\n"
-        f"👤 Total Users: {total_users}\n"
-        f"📥 Queue Size: {qsize}\n"
-        f"⚡ Active Threads: {active_threads}\n"
-        f"❌ Failed Uploads: {failed_count}\n\n"
-        f"💻 Live Downloads:\n"
-    )
-
-    if live_progress:
-        for uid, info in live_progress.items():
-            msg_text += f"• {uid}: {info['title']} {info['percent']} | Speed: {info['speed']} | ETA: {info['eta']}\n"
-    else:
-        msg_text += "No active downloads."
-
-    msg_text += "\nUse /reply <user_id> <message> to message any user."
-    bot.send_message(m.chat.id, msg_text)
-
-# -------------------------
-# ADMIN REPLY
-# -------------------------
-@bot.message_handler(commands=['reply'])
-def admin_reply(m):
-    if m.chat.id != ADMIN_ID:
-        return
-    try:
-        parts = m.text.split(" ", 2)
-        target_id = int(parts[1])
-        reply_text = parts[2]
-        bot.send_message(target_id, f"💬 Admin: {reply_text}")
-        bot.reply_to(m, f"✅ Message sent to {target_id}")
-    except:
-        bot.reply_to(m, "⚠️ Usage: /reply <user_id> <message>")
-
-# -------------------------
 # RUN BOT
 # -------------------------
 print("BOT STARTED")
-while True:
-    try:
-        bot.infinity_polling()
-    except Exception as e:
-        print("Bot crashed:", e)
-        time.sleep(5)
+bot.infinity_polling(timeout=60, long_polling_timeout=60)
