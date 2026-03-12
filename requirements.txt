@@ -2,6 +2,3 @@ pyTelegramBotAPI
 yt-dlp
 pyrogram
 tgcrypto
-ffmpeg-python
-aiohttp
-requests
