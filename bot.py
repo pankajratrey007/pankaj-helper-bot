@@ -1,8 +1,3 @@
-# ======================================
-# 🔥 Ultimate Telegram Downloader Bot
-# Stable Version (API + Queue + Auto Restart)
-# ======================================
-
 import os
 import time
 import math
@@ -10,35 +5,28 @@ import yt_dlp
 import telebot
 import sqlite3
 import threading
-import subprocess
 from queue import Queue
-from datetime import datetime
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram import Client
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # ======================================
-# BOT CONFIG
+# CONFIG
 # ======================================
 
-TOKEN = "8769882137:AAEanCgyfRU11WKxvO94LBn0KXvOqAPy5B4"
+TOKEN =
+"8769882137:AAEanCgyfRU11WKxvO94LBn0KXvOqAPy5B4"
 ADMIN_ID = 8274612882
 
 API_ID = 39058593
 API_HASH = "d78f8a54cf1bff913d24d0b1599723b1"
 
-MAX_THREADS_PER_USER = 2
-MAX_WORKERS = 1
 TEMP_DIR = "downloads"
-FILE_EXPIRY = 3600
+MAX_WORKERS = 3
 CHUNK_SIZE = 1500 * 1024 * 1024
 
 os.makedirs(TEMP_DIR, exist_ok=True)
 
 bot = telebot.TeleBot(TOKEN)
-
-# ======================================
-# START PYROGRAM CLIENT
-# ======================================
 
 app = Client(
     "uploader",
@@ -50,48 +38,16 @@ app = Client(
 app.start()
 
 # ======================================
-# UPDATE YT-DLP
-# ======================================
-
-def update_ytdlp():
-    try:
-        subprocess.run(["pip","install","-U","yt-dlp"], check=True)
-    except:
-        pass
-
-update_ytdlp()
-
-# ======================================
 # DATABASE
 # ======================================
 
 conn = sqlite3.connect("users.db", check_same_thread=False)
 cursor = conn.cursor()
-
 cursor.execute("CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY)")
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS downloads(
-id INTEGER PRIMARY KEY AUTOINCREMENT,
-user_id INTEGER,
-url TEXT,
-title TEXT,
-file TEXT,
-status TEXT,
-timestamp TEXT
-)
-""")
-
 conn.commit()
 
 def save_user(uid):
     cursor.execute("INSERT OR IGNORE INTO users VALUES(?)",(uid,))
-    conn.commit()
-
-def log_download(user_id,url,title,file,status):
-    cursor.execute(
-        "INSERT INTO downloads(user_id,url,title,file,status,timestamp) VALUES(?,?,?,?,?,?)",
-        (user_id,url,title,file,status,datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-    )
     conn.commit()
 
 # ======================================
@@ -99,61 +55,56 @@ def log_download(user_id,url,title,file,status):
 # ======================================
 
 queue = Queue()
-user_threads = {}
 
 # ======================================
-# SAFE SEND (PYROGRAM)
+# SAFE FILE SEND
 # ======================================
 
-def safe_send(file_path, chat_id, caption=None):
+def safe_send(file_path, chat):
 
-    try:
+    size = os.path.getsize(file_path)
 
-        size = os.path.getsize(file_path)
+    if size <= CHUNK_SIZE:
 
-        if size <= CHUNK_SIZE:
+        app.send_document(chat, file_path)
 
-            app.send_document(chat_id,file_path,caption=caption)
+    else:
 
-        else:
+        with open(file_path,"rb") as f:
 
-            with open(file_path,"rb") as f:
+            part = 1
 
-                total_chunks = math.ceil(size/CHUNK_SIZE)
+            while True:
 
-                for i in range(total_chunks):
+                chunk = f.read(CHUNK_SIZE)
 
-                    chunk = f.read(CHUNK_SIZE)
+                if not chunk:
+                    break
 
-                    chunk_file = f"{file_path}.part{i}"
+                part_file = f"{file_path}.part{part}"
 
-                    with open(chunk_file,"wb") as cf:
-                        cf.write(chunk)
+                with open(part_file,"wb") as pf:
+                    pf.write(chunk)
 
-                    app.send_document(chat_id,chunk_file,caption=caption if i==0 else None)
+                app.send_document(chat, part_file)
 
-                    os.remove(chunk_file)
+                os.remove(part_file)
 
-        return True
-
-    except Exception as e:
-
-        print("UPLOAD ERROR:",e)
-
-        return False
+                part += 1
 
 # ======================================
-# BOT COMMANDS
+# START COMMAND
 # ======================================
 
 @bot.message_handler(commands=['start'])
-def start_cmd(m):
+
+def start(m):
 
     save_user(m.chat.id)
 
     bot.send_message(
         m.chat.id,
-        "🔥 Ultimate Downloader Bot\n\nSend any video link"
+        "🔥 Ultimate Downloader Bot\n\nSend any video link."
     )
 
 # ======================================
@@ -162,10 +113,7 @@ def start_cmd(m):
 
 @bot.message_handler(func=lambda m: m.text and "http" in m.text)
 
-def link_cmd(m):
-
-    if user_threads.get(m.chat.id,0) >= MAX_THREADS_PER_USER:
-        return bot.reply_to(m,"⚠️ Wait for current downloads")
+def link_handler(m):
 
     url = m.text.strip()
 
@@ -173,7 +121,10 @@ def link_cmd(m):
 
     kb.add(
         InlineKeyboardButton("360p",callback_data=f"360|{url}"),
-        InlineKeyboardButton("720p",callback_data=f"720|{url}"),
+        InlineKeyboardButton("720p",callback_data=f"720|{url}")
+    )
+
+    kb.add(
         InlineKeyboardButton("1080p",callback_data=f"1080|{url}"),
         InlineKeyboardButton("MP3",callback_data=f"mp3|{url}")
     )
@@ -186,27 +137,25 @@ def link_cmd(m):
 
 @bot.callback_query_handler(func=lambda c: True)
 
-def callback_cmd(c):
+def callback(c):
 
     q,url = c.data.split("|",1)
 
     chat = c.message.chat.id
 
-    bot.send_message(chat,"⏳ Added to download queue")
+    bot.send_message(chat,"⏳ Added to queue")
 
     queue.put((chat,url,q))
 
-    user_threads[chat] = user_threads.get(chat,0)+1
-
 # ======================================
-# DOWNLOAD PROCESS
+# DOWNLOAD FUNCTION
 # ======================================
 
-def process(chat,url,q):
+def download(chat,url,q):
 
     try:
 
-        msg = bot.send_message(chat,"⬇️ Downloading...")
+        msg = bot.send_message(chat,"⬇ Downloading...")
 
         format_map = {
             "360":"18",
@@ -219,9 +168,7 @@ def process(chat,url,q):
             "format":format_map.get(q,"best"),
             "outtmpl":f"{TEMP_DIR}/%(title)s.%(ext)s",
             "quiet":True,
-            "retries":10,
-            "fragment_retries":10,
-            "socket_timeout":30
+            "retries":10
         }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -230,13 +177,7 @@ def process(chat,url,q):
 
             file = ydl.prepare_filename(info)
 
-            title = info.get("title","file")
-
-        caption = f"📥 {title}"
-
-        safe_send(file,chat,caption)
-
-        log_download(chat,url,title,file,"completed")
+        safe_send(file, chat)
 
         os.remove(file)
 
@@ -244,13 +185,7 @@ def process(chat,url,q):
 
     except Exception as e:
 
-        print("ERROR:",e)
-
         bot.send_message(chat,"❌ Download failed")
-
-    finally:
-
-        user_threads[chat] = max(user_threads.get(chat,1)-1,0)
 
 # ======================================
 # WORKER
@@ -262,7 +197,7 @@ def worker():
 
         chat,url,q = queue.get()
 
-        process(chat,url,q)
+        download(chat,url,q)
 
         queue.task_done()
 
@@ -270,14 +205,14 @@ def worker():
 # START WORKERS
 # ======================================
 
-for _ in range(MAX_WORKERS):
+for i in range(MAX_WORKERS):
 
     threading.Thread(target=worker,daemon=True).start()
 
 print("BOT STARTED")
 
 # ======================================
-# AUTO RESTART POLLING
+# AUTO RESTART
 # ======================================
 
 while True:
@@ -288,6 +223,6 @@ while True:
 
     except Exception as e:
 
-        print("Polling error:",e)
+        print("Restarting...",e)
 
         time.sleep(5)
