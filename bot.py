@@ -6,11 +6,20 @@ import os
 import subprocess
 import time
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram import Client
 
-TOKEN = "8769882137:AAFACkzcXlGXVJA5ymMs4E7woW4DlEkBRww"
+# CONFIG
+BOT_TOKEN = "8769882137:AAFACkzcXlGXVJA5ymMs4E7woW4DlEkBRww"
 ADMIN_ID = 8274612882
 
-bot = telebot.TeleBot(TOKEN)
+API_ID = 39058593
+API_HASH = "d78f8a54cf1bff913d24d0b1599723b1"
+
+bot = telebot.TeleBot(BOT_TOKEN)
+
+# USER UPLOADER
+uploader = Client("uploader", api_id=API_ID, api_hash=API_HASH)
+uploader.start()
 
 # DATABASE
 conn = sqlite3.connect("users.db", check_same_thread=False)
@@ -26,7 +35,7 @@ def save_user(uid):
 queue = []
 MAX_WORKERS = 5
 
-# START COMMAND
+# START
 @bot.message_handler(commands=['start'])
 def start(message):
 
@@ -59,7 +68,7 @@ def quality_select(message):
 
     bot.reply_to(message,"🎬 Select quality:",reply_markup=markup)
 
-# BUTTON CLICK
+# BUTTON
 @bot.callback_query_handler(func=lambda call: True)
 def callback(call):
 
@@ -69,7 +78,7 @@ def callback(call):
 
     bot.send_message(call.message.chat.id,"📥 Added to queue")
 
-# WORKER SYSTEM
+# WORKER
 def worker():
 
     while True:
@@ -83,9 +92,8 @@ def worker():
         else:
             time.sleep(1)
 
-# START 5 WORKERS
+# START WORKERS
 for i in range(MAX_WORKERS):
-
     threading.Thread(target=worker,daemon=True).start()
 
 # DOWNLOAD PROCESS
@@ -122,13 +130,29 @@ def process(chat_id,url,quality):
         }
 
         ydl_opts = {
-            "format":format_code.get(quality,"best"),
-            "outtmpl":"video.%(ext)s",
-            "retries":20,
-            "fragment_retries":20,
-            "geo_bypass":True,
-            "nocheckcertificate":True,
-            "concurrent_fragment_downloads":5,
+
+            "format": format_code.get(quality,"best"),
+            "outtmpl": "video.%(ext)s",
+
+            "retries": 30,
+            "fragment_retries": 30,
+            "file_access_retries": 10,
+            "extractor_retries": 5,
+
+            "concurrent_fragment_downloads": 8,
+
+            "noplaylist": True,
+            "geo_bypass": True,
+            "nocheckcertificate": True,
+            "restrictfilenames": True,
+
+            "socket_timeout": 30,
+
+            "http_headers": {
+                "User-Agent": "Mozilla/5.0",
+                "Accept-Language": "en-US,en;q=0.9"
+            },
+
             "progress_hooks":[progress_hook]
         }
 
@@ -140,14 +164,13 @@ def process(chat_id,url,quality):
 
             site = info.get("extractor","unknown")
 
-        bot.send_message(chat_id,f"🌐 Source detected: {site}")
+        bot.send_message(chat_id,f"🌐 Source: {site}")
 
         size = os.path.getsize(file)
 
-        # SPLIT LARGE FILE
         if size > 1900000000:
 
-            bot.send_message(chat_id,"📦 Splitting large video...")
+            bot.send_message(chat_id,"📦 Splitting video...")
 
             subprocess.call([
                 "ffmpeg","-i",file,
@@ -162,13 +185,13 @@ def process(chat_id,url,quality):
 
                 if f.startswith("part_"):
 
-                    bot.send_document(chat_id,open(f,"rb"))
+                    uploader.send_document(chat_id,f)
 
                     os.remove(f)
 
         else:
 
-            bot.send_document(chat_id,open(file,"rb"))
+            uploader.send_document(chat_id,file)
 
         os.remove(file)
 
@@ -178,7 +201,7 @@ def process(chat_id,url,quality):
             status.message_id
         )
 
-    except:
+    except Exception as e:
 
         bot.edit_message_text(
             "❌ Download failed. Try another link.",
@@ -190,7 +213,6 @@ def process(chat_id,url,quality):
 while True:
 
     try:
-
         bot.infinity_polling(timeout=60,long_polling_timeout=60)
 
     except:
