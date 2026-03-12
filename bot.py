@@ -1,18 +1,3 @@
-import subprocess, sys
-
-def ensure_ffmpeg():
-    try:
-        subprocess.run(["ffmpeg", "-version"], check=True)
-        print("[INFO] FFmpeg is installed ✅")
-    except:
-        print("[INFO] FFmpeg not found. Installing... ⚡")
-        # For Termux:
-        subprocess.run(["pkg","install","ffmpeg","-y"])
-        # For Linux/Ubuntu, uncomment below:
-        # subprocess.run(["sudo","apt","install","ffmpeg","-y"])
-        print("[INFO] FFmpeg installed successfully ✅")
-
-ensure_ffmpeg()
 # ======================================
 # 🔥 Ultimate Telegram Downloader Bot (Merged Version)
 # ======================================
