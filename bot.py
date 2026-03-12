@@ -5,6 +5,7 @@ import threading
 import os
 import subprocess
 import time
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 TOKEN = "8769882137:AAFACkzcXlGXVJA5ymMs4E7woW4DlEkBRww"
 ADMIN_ID = 8274612882
@@ -21,8 +22,9 @@ def save_user(uid):
     cursor.execute("INSERT OR IGNORE INTO users VALUES(?)",(uid,))
     conn.commit()
 
-# DOWNLOAD QUEUE
+# QUEUE
 queue = []
+MAX_WORKERS = 5
 
 # START
 @bot.message_handler(commands=['start'])
@@ -33,42 +35,41 @@ def start(message):
     bot.send_message(
         message.chat.id,
         "👋 Welcome to Pankaj Downloader Bot\n\n"
-        "Send video link from:\n"
-        "YouTube / Instagram / TikTok / Facebook\n\n"
-        "Choose quality after sending link."
+        "Send a video link from:\n"
+        "YouTube / Instagram / TikTok / Facebook"
     )
 
-# LINK HANDLER
+# LINK DETECT
 @bot.message_handler(func=lambda m: m.text and "http" in m.text)
-def ask_quality(message):
+def select_quality(message):
 
     url = message.text
 
-    markup = telebot.types.InlineKeyboardMarkup()
+    markup = InlineKeyboardMarkup()
 
     markup.add(
-        telebot.types.InlineKeyboardButton("360p", callback_data=f"360|{url}"),
-        telebot.types.InlineKeyboardButton("720p", callback_data=f"720|{url}"),
-        telebot.types.InlineKeyboardButton("1080p", callback_data=f"1080|{url}")
+        InlineKeyboardButton("360p",callback_data=f"360|{url}"),
+        InlineKeyboardButton("720p",callback_data=f"720|{url}")
     )
 
-    bot.send_message(message.chat.id,"Select quality:", reply_markup=markup)
+    markup.add(
+        InlineKeyboardButton("1080p",callback_data=f"1080|{url}"),
+        InlineKeyboardButton("MP3",callback_data=f"mp3|{url}")
+    )
 
-# QUALITY SELECT
+    bot.reply_to(message,"🎬 Select quality:",reply_markup=markup)
+
+# BUTTON CLICK
 @bot.callback_query_handler(func=lambda call: True)
 def callback(call):
 
-    q,url = call.data.split("|")
+    quality,url = call.data.split("|")
 
-    queue.append((call.message.chat.id,url,q))
+    queue.append((call.message.chat.id,url,quality))
 
-    bot.edit_message_text(
-        "📥 Added to queue...",
-        call.message.chat.id,
-        call.message.message_id
-    )
+    bot.send_message(call.message.chat.id,"📥 Added to queue")
 
-# WORKER
+# WORKER SYSTEM
 def worker():
 
     while True:
@@ -79,39 +80,73 @@ def worker():
 
             process(chat_id,url,quality)
 
-        time.sleep(1)
+        else:
+            time.sleep(1)
 
-threading.Thread(target=worker,daemon=True).start()
+# START 5 PARALLEL WORKERS
+for i in range(MAX_WORKERS):
+
+    threading.Thread(target=worker,daemon=True).start()
 
 # DOWNLOAD PROCESS
 def process(chat_id,url,quality):
 
-    status = bot.send_message(chat_id,"⏳ Downloading...")
+    status = bot.send_message(chat_id,"⏳ Starting download...")
+
+    def progress_hook(d):
+
+        if d['status'] == 'downloading':
+
+            percent = d.get('_percent_str','0%')
+            speed = d.get('_speed_str','0')
+            eta = d.get('_eta_str','0')
+
+            try:
+
+                bot.edit_message_text(
+                    f"⬇️ Downloading\n\nProgress: {percent}\nSpeed: {speed}\nETA: {eta}",
+                    chat_id,
+                    status.message_id
+                )
+
+            except:
+                pass
 
     try:
 
         format_code = {
             "360":"18",
             "720":"22",
-            "1080":"137+140"
+            "1080":"137+140",
+            "mp3":"bestaudio"
         }
 
         ydl_opts = {
-            "format": format_code.get(quality,"best"),
+            "format":format_code.get(quality,"best"),
             "outtmpl":"video.%(ext)s",
-            "retries":10
+            "retries":15,
+            "fragment_retries":15,
+            "geo_bypass":True,
+            "nocheckcertificate":True,
+            "progress_hooks":[progress_hook]
         }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
 
-            info = ydl.extract_info(url, download=True)
+            info = ydl.extract_info(url,download=True)
 
             file = ydl.prepare_filename(info)
 
+            site = info.get("extractor","unknown")
+
+        bot.send_message(chat_id,f"🌐 Source detected: {site}")
+
         size = os.path.getsize(file)
 
-        # SPLIT LARGE FILES
+        # SPLIT LARGE FILE
         if size > 1900000000:
+
+            bot.send_message(chat_id,"📦 Splitting large file...")
 
             subprocess.call([
                 "ffmpeg","-i",file,
@@ -145,7 +180,7 @@ def process(chat_id,url,quality):
     except Exception as e:
 
         bot.edit_message_text(
-            "❌ Download failed",
+            "❌ Download failed. Try another link.",
             chat_id,
             status.message_id
         )
@@ -161,7 +196,9 @@ def broadcast(message):
 
     cursor.execute("SELECT id FROM users")
 
-    for u in cursor.fetchall():
+    users = cursor.fetchall()
+
+    for u in users:
 
         try:
             bot.send_message(u[0],text)
@@ -178,5 +215,4 @@ while True:
         bot.infinity_polling(timeout=60,long_polling_timeout=60)
 
     except:
-
         time.sleep(5)
