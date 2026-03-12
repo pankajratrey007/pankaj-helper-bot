@@ -26,7 +26,7 @@ def save_user(uid):
 queue = []
 MAX_WORKERS = 5
 
-# START
+# START COMMAND
 @bot.message_handler(commands=['start'])
 def start(message):
 
@@ -35,13 +35,13 @@ def start(message):
     bot.send_message(
         message.chat.id,
         "👋 Welcome to Pankaj Downloader Bot\n\n"
-        "Send a video link from:\n"
+        "Send video link\n"
         "YouTube / Instagram / TikTok / Facebook"
     )
 
 # LINK DETECT
 @bot.message_handler(func=lambda m: m.text and "http" in m.text)
-def select_quality(message):
+def quality_select(message):
 
     url = message.text
 
@@ -83,7 +83,7 @@ def worker():
         else:
             time.sleep(1)
 
-# START 5 PARALLEL WORKERS
+# START 5 WORKERS
 for i in range(MAX_WORKERS):
 
     threading.Thread(target=worker,daemon=True).start()
@@ -124,10 +124,11 @@ def process(chat_id,url,quality):
         ydl_opts = {
             "format":format_code.get(quality,"best"),
             "outtmpl":"video.%(ext)s",
-            "retries":15,
-            "fragment_retries":15,
+            "retries":20,
+            "fragment_retries":20,
             "geo_bypass":True,
             "nocheckcertificate":True,
+            "concurrent_fragment_downloads":5,
             "progress_hooks":[progress_hook]
         }
 
@@ -146,13 +147,13 @@ def process(chat_id,url,quality):
         # SPLIT LARGE FILE
         if size > 1900000000:
 
-            bot.send_message(chat_id,"📦 Splitting large file...")
+            bot.send_message(chat_id,"📦 Splitting large video...")
 
             subprocess.call([
                 "ffmpeg","-i",file,
                 "-c","copy",
                 "-map","0",
-                "-segment_time","00:10:00",
+                "-segment_time","600",
                 "-f","segment",
                 "part_%03d.mp4"
             ])
@@ -172,12 +173,12 @@ def process(chat_id,url,quality):
         os.remove(file)
 
         bot.edit_message_text(
-            "✅ Download complete!",
+            "✅ Download completed!",
             chat_id,
             status.message_id
         )
 
-    except Exception as e:
+    except:
 
         bot.edit_message_text(
             "❌ Download failed. Try another link.",
@@ -185,29 +186,7 @@ def process(chat_id,url,quality):
             status.message_id
         )
 
-# BROADCAST
-@bot.message_handler(commands=['broadcast'])
-def broadcast(message):
-
-    if message.chat.id != ADMIN_ID:
-        return
-
-    text = message.text.replace("/broadcast ","")
-
-    cursor.execute("SELECT id FROM users")
-
-    users = cursor.fetchall()
-
-    for u in users:
-
-        try:
-            bot.send_message(u[0],text)
-        except:
-            pass
-
-    bot.send_message(message.chat.id,"✅ Broadcast sent")
-
-# RUN
+# RUN BOT
 while True:
 
     try:
