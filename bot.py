@@ -11,10 +11,10 @@ from pyrogram import Client
 # ---------------------------
 # CONFIGURATION
 # ---------------------------
-TOKEN = "8769882137:AAFACkzcXlGXVJA5ymMs4E7woW4DlEkBRww"   # Your bot token
-ADMIN_ID = 8274612882                                       # Your Telegram ID
-API_ID = 39058593                                           # Your Pyrogram API_ID
-API_HASH = "d78f8a54cf1bff913d24d0b1599723b1"              # Your Pyrogram API_HASH
+TOKEN = "8769882137:AAFACkzcXlGXVJA5ymMs4E7woW4DlEkBRww"
+ADMIN_ID = 8274612882
+API_ID = 39058593
+API_HASH = "d78f8a54cf1bff913d24d0b1599723b1"
 
 bot = telebot.TeleBot(TOKEN)
 userbot = Client("uploader", api_id=API_ID, api_hash=API_HASH)
@@ -35,7 +35,7 @@ def save_user(uid):
 # QUEUE SYSTEM
 # ---------------------------
 queue = []
-MAX_WORKERS = 5
+MAX_WORKERS = 5  # parallel downloads
 
 # ---------------------------
 # /start COMMAND
@@ -46,13 +46,13 @@ def start(message):
     bot.send_message(
         message.chat.id,
         "👋 Welcome to Pankaj Downloader Bot\n\n"
-        "Send video link from:\n"
+        "Send a video link from:\n"
         "YouTube / Instagram / TikTok / Facebook\n\n"
         "Choose the quality, the bot downloads automatically."
     )
 
 # ---------------------------
-# DETECT LINKS AND SHOW QUALITY
+# LINK DETECT & QUALITY SELECT
 # ---------------------------
 @bot.message_handler(func=lambda m: m.text and "http" in m.text)
 def quality_select(message):
@@ -73,12 +73,15 @@ def quality_select(message):
 # ---------------------------
 @bot.callback_query_handler(func=lambda call: True)
 def callback(call):
-    quality, url = call.data.split("|")
-    queue.append((call.message.chat.id, url, quality))
-    bot.send_message(call.message.chat.id, "📥 Added to queue")
+    try:
+        quality, url = call.data.split("|")
+        queue.append((call.message.chat.id, url, quality))
+        bot.send_message(call.message.chat.id, "📥 Added to download queue")
+    except:
+        bot.send_message(call.message.chat.id, "❌ Failed to add to queue")
 
 # ---------------------------
-# WORKER SYSTEM
+# WORKER SYSTEM (Multi-server / Parallel)
 # ---------------------------
 def worker():
     while True:
@@ -95,7 +98,6 @@ for _ in range(MAX_WORKERS):
 # DOWNLOAD FUNCTION
 # ---------------------------
 def process(chat_id, url, quality):
-
     status = bot.send_message(chat_id, "⏳ Starting download...")
 
     def progress_hook(d):
@@ -169,7 +171,10 @@ def process(chat_id, url, quality):
         bot.edit_message_text("✅ Download completed!", chat_id, status.message_id)
 
     except Exception as e:
-        bot.edit_message_text(f"❌ Download failed. Try another link.\nError: {e}", chat_id, status.message_id)
+        bot.edit_message_text(
+            f"❌ Download failed. Try another link.\nError: {e}",
+            chat_id, status.message_id
+        )
 
 # ---------------------------
 # BROADCAST COMMAND
