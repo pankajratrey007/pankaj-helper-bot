@@ -1,22 +1,13 @@
 import telebot
 import yt_dlp
-import os
 import sqlite3
 import threading
+import os
+import subprocess
 import time
-from pyrogram import Client
 
-# BOT TOKEN
 TOKEN = "8769882137:AAFACkzcXlGXVJA5ymMs4E7woW4DlEkBRww"
-
-# ADMIN ID
 ADMIN_ID = 8274612882
-
-# PYROGRAM USERBOT (needed for large uploads)
-API_ID = 123456
-API_HASH = "YOUR_API_HASH"
-
-userbot = Client("uploader", api_id=API_ID, api_hash=API_HASH)
 
 bot = telebot.TeleBot(TOKEN)
 
@@ -30,109 +21,162 @@ def save_user(uid):
     cursor.execute("INSERT OR IGNORE INTO users VALUES(?)",(uid,))
     conn.commit()
 
+# DOWNLOAD QUEUE
 queue = []
 
+# START
 @bot.message_handler(commands=['start'])
 def start(message):
+
     save_user(message.chat.id)
 
     bot.send_message(
         message.chat.id,
         "👋 Welcome to Pankaj Downloader Bot\n\n"
-        "Send a video link from:\n"
+        "Send video link from:\n"
         "YouTube / Instagram / TikTok / Facebook\n\n"
-        "Bot downloads automatically."
+        "Choose quality after sending link."
     )
 
+# LINK HANDLER
 @bot.message_handler(func=lambda m: m.text and "http" in m.text)
-def add_queue(message):
-    bot.reply_to(message,"📥 Added to queue...")
-    queue.append(message)
+def ask_quality(message):
 
+    url = message.text
+
+    markup = telebot.types.InlineKeyboardMarkup()
+
+    markup.add(
+        telebot.types.InlineKeyboardButton("360p", callback_data=f"360|{url}"),
+        telebot.types.InlineKeyboardButton("720p", callback_data=f"720|{url}"),
+        telebot.types.InlineKeyboardButton("1080p", callback_data=f"1080|{url}")
+    )
+
+    bot.send_message(message.chat.id,"Select quality:", reply_markup=markup)
+
+# QUALITY SELECT
+@bot.callback_query_handler(func=lambda call: True)
+def callback(call):
+
+    q,url = call.data.split("|")
+
+    queue.append((call.message.chat.id,url,q))
+
+    bot.edit_message_text(
+        "📥 Added to queue...",
+        call.message.chat.id,
+        call.message.message_id
+    )
+
+# WORKER
 def worker():
+
     while True:
+
         if queue:
-            msg = queue.pop(0)
-            process_download(msg)
-        time.sleep(2)
+
+            chat_id,url,quality = queue.pop(0)
+
+            process(chat_id,url,quality)
+
+        time.sleep(1)
 
 threading.Thread(target=worker,daemon=True).start()
 
-def process_download(message):
-    url = message.text
-    status = bot.send_message(message.chat.id,"⏳ Downloading...")
+# DOWNLOAD PROCESS
+def process(chat_id,url,quality):
+
+    status = bot.send_message(chat_id,"⏳ Downloading...")
 
     try:
+
+        format_code = {
+            "360":"18",
+            "720":"22",
+            "1080":"137+140"
+        }
+
         ydl_opts = {
-            "format":"bestvideo+bestaudio/best",
-            "outtmpl":"%(title)s.%(ext)s",
-            "noplaylist":True,
+            "format": format_code.get(quality,"best"),
+            "outtmpl":"video.%(ext)s",
             "retries":10
         }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+
             info = ydl.extract_info(url, download=True)
+
             file = ydl.prepare_filename(info)
 
-        size = os.path.getsize(file)/(1024*1024)
+        size = os.path.getsize(file)
 
-        if size < 2000:
-            userbot.start()
-            userbot.send_video(message.chat.id,file)
-            userbot.stop()
+        # SPLIT LARGE FILES
+        if size > 1900000000:
+
+            subprocess.call([
+                "ffmpeg","-i",file,
+                "-c","copy",
+                "-map","0",
+                "-segment_time","00:10:00",
+                "-f","segment",
+                "part_%03d.mp4"
+            ])
+
+            for f in os.listdir():
+
+                if f.startswith("part_"):
+
+                    bot.send_document(chat_id,open(f,"rb"))
+
+                    os.remove(f)
+
         else:
-            bot.send_message(message.chat.id,"⚠️ File too large.")
+
+            bot.send_document(chat_id,open(file,"rb"))
 
         os.remove(file)
 
         bot.edit_message_text(
-            "✅ Download completed!",
-            message.chat.id,
+            "✅ Download complete!",
+            chat_id,
             status.message_id
         )
 
     except Exception as e:
+
         bot.edit_message_text(
-            "❌ Download failed.",
-            message.chat.id,
+            "❌ Download failed",
+            chat_id,
             status.message_id
         )
 
+# BROADCAST
 @bot.message_handler(commands=['broadcast'])
 def broadcast(message):
+
     if message.chat.id != ADMIN_ID:
         return
 
     text = message.text.replace("/broadcast ","")
-    cursor.execute("SELECT id FROM users")
-    users = cursor.fetchall()
 
-    for u in users:
+    cursor.execute("SELECT id FROM users")
+
+    for u in cursor.fetchall():
+
         try:
             bot.send_message(u[0],text)
         except:
             pass
 
-    bot.send_message(message.chat.id,"✅ Broadcast sent.")
+    bot.send_message(message.chat.id,"✅ Broadcast sent")
 
-@bot.message_handler(commands=['reply'])
-def reply_user(message):
-    if message.chat.id != ADMIN_ID:
-        return
-
-    try:
-        parts = message.text.split(" ",2)
-        uid = int(parts[1])
-        text = parts[2]
-
-        bot.send_message(uid,text)
-        bot.send_message(message.chat.id,"✅ Message sent.")
-
-    except:
-        bot.send_message(message.chat.id,"Usage:\n/reply USER_ID message")
-
+# RUN
 while True:
+
     try:
+
         bot.infinity_polling(timeout=60,long_polling_timeout=60)
+
     except:
+
         time.sleep(5)
