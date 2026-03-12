@@ -92,7 +92,7 @@ def save_failed_queue():
 # -------------------------
 queue = Queue()
 user_threads = {}
-live_progress = {}
+live_progress = {}  # chat_id -> {'msg_id','title','percent','speed','eta'}
 
 # Re-add failed downloads on bot restart
 for item in failed_queue:
@@ -130,10 +130,14 @@ def dashboard(m):
     qsize = queue.qsize()
     active_threads = sum(user_threads.values())
 
-    msg_text = f"📊 Admin Dashboard\n\n👤 Total Users: {total_users}\n📥 Queue Size: {qsize}\n⚡ Active Threads: {active_threads}\n\n💻 Live Downloads:\n"
+    msg_text = f"📊 Admin Dashboard\n\n"
+    msg_text += f"👤 Total Users: {total_users}\n📥 Queue Size: {qsize}\n⚡ Active Threads: {active_threads}\n\n💻 Live Downloads:\n"
+
     if live_progress:
         for uid, info in live_progress.items():
-            msg_text += f"• {uid}: {info['title']} {info['percent']} | Speed: {info['speed']} | ETA: {info['eta']}\n"
+            msg_text += f"• User {uid}:\n"
+            msg_text += f"   ▸ {info['title']}\n"
+            msg_text += f"   ▸ {info['percent']} | Speed: {info['speed']} | ETA: {info['eta']}\n"
     else:
         msg_text += "No active downloads."
     bot.send_message(m.chat.id, msg_text)
@@ -190,16 +194,6 @@ def retry(m):
         bot.reply_to(m, "⚠️ Usage: /retry <download_id>")
 
 # -------------------------
-# MESSAGE LOGGING
-# -------------------------
-@bot.message_handler(func=lambda m: True)
-def log_all_messages(m):
-    save_user(m.chat.id)
-    print(f"[{datetime.now()}] {m.chat.id}: {m.text}")
-    if m.chat.id != ADMIN_ID:
-        bot.send_message(m.chat.id, "🤖 Message received, processing your request...")
-
-# -------------------------
 # LINK DETECTION
 # -------------------------
 @bot.message_handler(func=lambda m: m.text and "http" in m.text)
@@ -221,13 +215,23 @@ def link(m):
     bot.reply_to(m, "Select quality:", reply_markup=kb)
 
 # -------------------------
+# MESSAGE LOGGING
+# -------------------------
+@bot.message_handler(func=lambda m: m.text and "http" not in m.text)
+def log_all_messages(m):
+    save_user(m.chat.id)
+    print(f"[{datetime.now()}] {m.chat.id}: {m.text}")
+    if m.chat.id != ADMIN_ID:
+        bot.send_message(m.chat.id, "🤖 Message received, processing your request...")
+
+# -------------------------
 # BUTTON HANDLER
 # -------------------------
 @bot.callback_query_handler(func=lambda c: True)
 def cb(c):
     try:
-        quality, url = c.data.split("|")
-        queue.put((c.message.chat.id, url, quality, 0))  # retries = 0
+        quality, url = c.data.split("|", 1)
+        queue.put((c.message.chat.id, url, quality, 0))
         user_threads[c.message.chat.id] = user_threads.get(c.message.chat.id, 0) + 1
         bot.send_message(c.message.chat.id, f"📥 Added to queue (position: {queue.qsize()})")
     except Exception as e:
@@ -258,7 +262,7 @@ for i in range(MAX_WORKERS):
     threading.Thread(target=worker, daemon=True).start()
 
 # -------------------------
-# DOWNLOAD FUNCTION WITH HISTORY & AUTO-RESUME
+# DOWNLOAD FUNCTION WITH LIVE MULTI-PROGRESS
 # -------------------------
 def safe_send(uploader, chat, file, caption, thumb=None):
     try:
@@ -272,18 +276,24 @@ def process(chat, url, q, retries=0):
     format_map = {"360": "18", "720": "22", "1080": "bestvideo+bestaudio", "mp3": "bestaudio"}
     last_edit = 0
 
+    live_progress[chat] = {"msg_id": msg.message_id, "title": "Starting...", "percent": "", "speed": "", "eta": ""}
+
     def progress(d):
         nonlocal last_edit
-        if d["status"] == "downloading" and time.time() - last_edit > 2:
-            live_progress[chat] = {
+        if d["status"] == "downloading" and time.time() - last_edit > 1:
+            live_progress[chat].update({
                 "title": d.get("filename", "Downloading"),
                 "percent": d.get("_percent_str", ""),
                 "speed": d.get("_speed_str", ""),
                 "eta": d.get("_eta_str", "")
-            }
+            })
             try:
-                bot.edit_message_text(f"⬇️ {live_progress[chat]['percent']} | Speed: {live_progress[chat]['speed']} | ETA: {live_progress[chat]['eta']}", chat, msg.message_id)
-            except: pass
+                bot.edit_message_text(
+                    f"⬇️ {live_progress[chat]['title']}\n{live_progress[chat]['percent']} | Speed: {live_progress[chat]['speed']} | ETA: {live_progress[chat]['eta']}",
+                    chat, live_progress[chat]["msg_id"]
+                )
+            except:
+                pass
             last_edit = time.time()
 
     ydl_opts = {
@@ -316,7 +326,6 @@ def process(chat, url, q, retries=0):
     uploader = uploaders[-1] if size > 1500000000 else random.choice(uploaders)
 
     try:
-        # Split large files safely
         if size > 1900000000:
             subprocess.call([
                 "ffmpeg", "-i", file, "-c", "copy", "-map", "0",
@@ -342,7 +351,10 @@ def process(chat, url, q, retries=0):
 
     if os.path.exists(file): os.remove(file)
     if thumb_file and os.path.exists(thumb_file): os.remove(thumb_file)
-    bot.edit_message_text("✅ Download finished", chat, msg.message_id)
+    try:
+        bot.edit_message_text("✅ Download finished", chat, live_progress[chat]["msg_id"])
+    except:
+        pass
     live_progress.pop(chat, None)
 
 # -------------------------
