@@ -2,8 +2,8 @@ import telebot
 import yt_dlp
 import os
 import sqlite3
+import threading
 import time
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 TOKEN = "8769882137:AAFACkzcXlGXVJA5ymMs4E7woW4DlEkBRww"
 ADMIN_ID = 8274612882
@@ -13,13 +13,15 @@ bot = telebot.TeleBot(TOKEN)
 # DATABASE
 conn = sqlite3.connect("users.db", check_same_thread=False)
 cursor = conn.cursor()
-
 cursor.execute("CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY)")
 conn.commit()
 
 def save_user(user_id):
     cursor.execute("INSERT OR IGNORE INTO users VALUES(?)",(user_id,))
     conn.commit()
+
+# DOWNLOAD QUEUE
+queue = []
 
 # START
 @bot.message_handler(commands=['start'])
@@ -29,114 +31,90 @@ def start(message):
 
     bot.send_message(
         message.chat.id,
-        "👋 Welcome to *Pankaj Downloader Bot*\n\n"
+        "👋 Welcome to Pankaj Downloader Bot\n\n"
         "Send video link from:\n"
-        "YouTube\nInstagram\nTikTok\nFacebook\nTwitter\n\n"
-        "Then choose quality.",
-        parse_mode="Markdown"
+        "YouTube / Instagram / TikTok / Facebook / Twitter\n\n"
+        "The bot will download automatically."
     )
 
 # LINK DETECTION
-@bot.message_handler(func=lambda message: message.text and "http" in message.text.lower())
-def ask_quality(message):
+@bot.message_handler(func=lambda message: message.text and "http" in message.text)
+def add_queue(message):
+
+    bot.reply_to(message,"📥 Added to download queue...")
+
+    queue.append(message)
+
+# WORKER
+def worker():
+
+    while True:
+
+        if queue:
+
+            message = queue.pop(0)
+
+            download_video(message)
+
+        time.sleep(2)
+
+threading.Thread(target=worker,daemon=True).start()
+
+# DOWNLOAD FUNCTION
+def download_video(message):
 
     url = message.text
 
-    markup = InlineKeyboardMarkup()
-
-    markup.add(
-        InlineKeyboardButton("360p", callback_data=f"360|{url}"),
-        InlineKeyboardButton("720p", callback_data=f"720|{url}")
-    )
-
-    markup.add(
-        InlineKeyboardButton("1080p", callback_data=f"1080|{url}")
-    )
-
-    markup.add(
-        InlineKeyboardButton("MP3", callback_data=f"audio|{url}")
-    )
-
-    bot.send_message(
-        message.chat.id,
-        "🎬 Choose download quality:",
-        reply_markup=markup
-    )
-
-# DOWNLOAD
-@bot.callback_query_handler(func=lambda call: True)
-def download(call):
-
-    quality, url = call.data.split("|")
-
-    status = bot.send_message(call.message.chat.id,"⏳ Downloading...")
+    status = bot.send_message(message.chat.id,"⏳ Download starting...")
 
     try:
 
-        if quality == "audio":
-
-            ydl_opts = {
-                'format':'bestaudio',
-                'outtmpl':'audio.%(ext)s'
-            }
-
-        elif quality == "360":
-
-            ydl_opts = {
-                'format':'bestvideo[height<=360]+bestaudio/best',
-                'outtmpl':'video.%(ext)s'
-            }
-
-        elif quality == "720":
-
-            ydl_opts = {
-                'format':'bestvideo[height<=720]+bestaudio/best',
-                'outtmpl':'video.%(ext)s'
-            }
-
-        else:
-
-            ydl_opts = {
-                'format':'bestvideo[height<=1080]+bestaudio/best',
-                'outtmpl':'video.%(ext)s'
-            }
+        ydl_opts = {
+            'format':'bestvideo[height<=720]+bestaudio/best',
+            'outtmpl':'%(title)s.%(ext)s',
+            'noplaylist':True,
+            'quiet':True,
+            'nocheckcertificate':True,
+            'ignoreerrors':False,
+            'retries':10,
+            'fragment_retries':10
+        }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
 
             info = ydl.extract_info(url, download=True)
+
             filename = ydl.prepare_filename(info)
 
         size = os.path.getsize(filename)/(1024*1024)
 
         if size < 50:
 
-            with open(filename,'rb') as file:
+            with open(filename,"rb") as video:
 
-                if quality == "audio":
-                    bot.send_audio(call.message.chat.id,file)
-                else:
-                    bot.send_video(call.message.chat.id,file)
+                bot.send_video(message.chat.id,video)
 
         else:
 
             bot.send_message(
-                call.message.chat.id,
-                "⚠️ File too large for Telegram (50MB limit).\n\nDownload from original link:\n"+url
+                message.chat.id,
+                "📦 File larger than Telegram bot limit.\n\n"
+                "Download from original link:\n"+url
             )
 
         os.remove(filename)
 
         bot.edit_message_text(
             "✅ Download completed!",
-            call.message.chat.id,
+            message.chat.id,
             status.message_id
         )
 
-    except:
+    except Exception as e:
 
         bot.edit_message_text(
-            "❌ Download failed. Try another link.",
-            call.message.chat.id,
+            "❌ Download failed.\nThis website may block downloads.",
+            message.chat.id,
             status.message_id
         )
 
@@ -150,6 +128,7 @@ def broadcast(message):
     text = message.text.replace("/broadcast ","")
 
     cursor.execute("SELECT id FROM users")
+
     users = cursor.fetchall()
 
     for user in users:
@@ -173,6 +152,7 @@ def reply_user(message):
         parts = message.text.split(" ",2)
 
         user_id = int(parts[1])
+
         text = parts[2]
 
         bot.send_message(user_id,text)
