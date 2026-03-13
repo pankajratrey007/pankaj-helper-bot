@@ -1,228 +1,171 @@
 import os
-import time
-import math
+import asyncio
 import yt_dlp
-import telebot
-import sqlite3
-import threading
-from queue import Queue
-from pyrogram import Client
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+import time
+from pyrogram import Client, filters
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# ======================================
+# =============================
 # CONFIG
-# ======================================
+# =============================
 
-TOKEN =
-"8769882137:AAEanCgyfRU11WKxvO94LBn0KXvOqAPy5B4"
-ADMIN_ID = 8274612882
-
+BOT_TOKEN = "8769882137:AAEanCgyfRU11WKxvO94LBn0KXvOqAPy5B4"
 API_ID = 39058593
 API_HASH = "d78f8a54cf1bff913d24d0b1599723b1"
 
-TEMP_DIR = "downloads"
-MAX_WORKERS = 3
-CHUNK_SIZE = 1500 * 1024 * 1024
+DOWNLOAD_DIR = "downloads"
+MAX_PARALLEL_DOWNLOADS = 4
+AUTO_DELETE_TIME = 1800   # 30 minutes
 
-os.makedirs(TEMP_DIR, exist_ok=True)
-
-bot = telebot.TeleBot(TOKEN)
+os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 app = Client(
-    "uploader",
+    "premium_bot",
     api_id=API_ID,
     api_hash=API_HASH,
-    bot_token=TOKEN
+    bot_token=BOT_TOKEN
 )
 
-app.start()
+download_queue = asyncio.Queue()
 
-# ======================================
-# DATABASE
-# ======================================
+# =============================
+# PROGRESS BAR
+# =============================
 
-conn = sqlite3.connect("users.db", check_same_thread=False)
-cursor = conn.cursor()
-cursor.execute("CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY)")
-conn.commit()
+async def progress(current, total, message):
 
-def save_user(uid):
-    cursor.execute("INSERT OR IGNORE INTO users VALUES(?)",(uid,))
-    conn.commit()
+    percent = current * 100 / total
 
-# ======================================
-# QUEUE
-# ======================================
+    bar = "█" * int(percent / 5) + "░" * (20 - int(percent / 5))
 
-queue = Queue()
+    text = f"""
+⬇ Downloading
 
-# ======================================
-# SAFE FILE SEND
-# ======================================
+[{bar}] {percent:.1f}%
 
-def safe_send(file_path, chat):
-
-    size = os.path.getsize(file_path)
-
-    if size <= CHUNK_SIZE:
-
-        app.send_document(chat, file_path)
-
-    else:
-
-        with open(file_path,"rb") as f:
-
-            part = 1
-
-            while True:
-
-                chunk = f.read(CHUNK_SIZE)
-
-                if not chunk:
-                    break
-
-                part_file = f"{file_path}.part{part}"
-
-                with open(part_file,"wb") as pf:
-                    pf.write(chunk)
-
-                app.send_document(chat, part_file)
-
-                os.remove(part_file)
-
-                part += 1
-
-# ======================================
-# START COMMAND
-# ======================================
-
-@bot.message_handler(commands=['start'])
-
-def start(m):
-
-    save_user(m.chat.id)
-
-    bot.send_message(
-        m.chat.id,
-        "🔥 Ultimate Downloader Bot\n\nSend any video link."
-    )
-
-# ======================================
-# LINK DETECTOR
-# ======================================
-
-@bot.message_handler(func=lambda m: m.text and "http" in m.text)
-
-def link_handler(m):
-
-    url = m.text.strip()
-
-    kb = InlineKeyboardMarkup()
-
-    kb.add(
-        InlineKeyboardButton("360p",callback_data=f"360|{url}"),
-        InlineKeyboardButton("720p",callback_data=f"720|{url}")
-    )
-
-    kb.add(
-        InlineKeyboardButton("1080p",callback_data=f"1080|{url}"),
-        InlineKeyboardButton("MP3",callback_data=f"mp3|{url}")
-    )
-
-    bot.reply_to(m,"Select quality:",reply_markup=kb)
-
-# ======================================
-# CALLBACK
-# ======================================
-
-@bot.callback_query_handler(func=lambda c: True)
-
-def callback(c):
-
-    q,url = c.data.split("|",1)
-
-    chat = c.message.chat.id
-
-    bot.send_message(chat,"⏳ Added to queue")
-
-    queue.put((chat,url,q))
-
-# ======================================
-# DOWNLOAD FUNCTION
-# ======================================
-
-def download(chat,url,q):
+{current//1024//1024}MB / {total//1024//1024}MB
+"""
 
     try:
+        await message.edit(text)
+    except:
+        pass
 
-        msg = bot.send_message(chat,"⬇ Downloading...")
+# =============================
+# CLEANUP
+# =============================
 
-        format_map = {
-            "360":"18",
-            "720":"22",
-            "1080":"bestvideo+bestaudio",
-            "mp3":"bestaudio"
-        }
+async def auto_delete(file):
 
-        ydl_opts = {
-            "format":format_map.get(q,"best"),
-            "outtmpl":f"{TEMP_DIR}/%(title)s.%(ext)s",
-            "quiet":True,
-            "retries":10
-        }
+    await asyncio.sleep(AUTO_DELETE_TIME)
 
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-
-            info = ydl.extract_info(url,download=True)
-
-            file = ydl.prepare_filename(info)
-
-        safe_send(file, chat)
-
+    if os.path.exists(file):
         os.remove(file)
 
-        bot.edit_message_text("✅ Download finished",chat,msg.message_id)
+# =============================
+# DOWNLOAD FUNCTION
+# =============================
 
-    except Exception as e:
-
-        bot.send_message(chat,"❌ Download failed")
-
-# ======================================
-# WORKER
-# ======================================
-
-def worker():
+async def download_worker():
 
     while True:
 
-        chat,url,q = queue.get()
+        url, message = await download_queue.get()
 
-        download(chat,url,q)
+        try:
 
-        queue.task_done()
+            msg = await message.reply("⬇ Starting download...")
 
-# ======================================
+            ydl_opts = {
+                "outtmpl": f"{DOWNLOAD_DIR}/%(title)s.%(ext)s",
+                "retries": 10,
+                "fragment_retries": 10,
+                "continuedl": True,
+                "quiet": True
+            }
+
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+
+                info = ydl.extract_info(url, download=True)
+
+                file = ydl.prepare_filename(info)
+
+            await msg.edit("📤 Uploading...")
+
+            sent = await message.reply_document(file)
+
+            asyncio.create_task(auto_delete(file))
+
+            await msg.edit("✅ Download completed")
+
+        except Exception as e:
+
+            await message.reply("❌ Download failed")
+
+        download_queue.task_done()
+
+# =============================
+# START COMMAND
+# =============================
+
+@app.on_message(filters.command("start"))
+
+async def start(client, message):
+
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("Help", callback_data="help")]
+    ])
+
+    await message.reply(
+        "🔥 Premium Downloader Bot\n\nSend any video link.",
+        reply_markup=kb
+    )
+
+# =============================
+# HELP BUTTON
+# =============================
+
+@app.on_callback_query()
+
+async def callbacks(client, query):
+
+    if query.data == "help":
+
+        await query.message.edit(
+            "Send links from:\n\n"
+            "YouTube\nInstagram\nTikTok\nFacebook\nTwitter"
+        )
+
+# =============================
+# LINK HANDLER
+# =============================
+
+@app.on_message(filters.text & filters.regex("http"))
+
+async def link_handler(client, message):
+
+    url = message.text.strip()
+
+    await download_queue.put((url, message))
+
+    await message.reply("⏳ Added to queue")
+
+# =============================
 # START WORKERS
-# ======================================
+# =============================
 
-for i in range(MAX_WORKERS):
+async def main():
 
-    threading.Thread(target=worker,daemon=True).start()
+    for _ in range(MAX_PARALLEL_DOWNLOADS):
 
-print("BOT STARTED")
+        asyncio.create_task(download_worker())
 
-# ======================================
-# AUTO RESTART
-# ======================================
+    await app.start()
 
-while True:
+    print("BOT RUNNING")
 
-    try:
+    await idle()
 
-        bot.infinity_polling(timeout=60,long_polling_timeout=60)
+from pyrogram import idle
 
-    except Exception as e:
-
-        print("Restarting...",e)
-
-        time.sleep(5)
+asyncio.run(main())
