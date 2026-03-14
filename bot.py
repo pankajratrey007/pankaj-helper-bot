@@ -1,3 +1,4 @@
+print("BOT FILE STARTED")
 import os
 import asyncio
 import yt_dlp
