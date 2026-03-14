@@ -5,6 +5,7 @@ import asyncio
 import yt_dlp
 from pyrogram import Client, filters, idle
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram.errors import FloodWait
 
 # =========================
 # CONFIG
@@ -39,7 +40,6 @@ async def progress(current, total, message):
         return
 
     percent = current * 100 / total
-
     bar = "█" * int(percent / 5) + "░" * (20 - int(percent / 5))
 
     text = f"""
@@ -51,6 +51,7 @@ async def progress(current, total, message):
 """
 
     try:
+        await asyncio.sleep(1)
         await message.edit(text)
     except:
         pass
@@ -98,9 +99,7 @@ async def download_video(url, msg):
         }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-
             info = ydl.extract_info(url, download=True)
-
             return ydl.prepare_filename(info)
 
     return await loop.run_in_executor(None, run)
@@ -137,7 +136,7 @@ async def worker():
 
 
 # =========================
-# START
+# START COMMAND
 # =========================
 
 @app.on_message(filters.command("start"))
@@ -154,19 +153,53 @@ async def start(client, message):
 
 
 # =========================
-# HELP
+# HELP COMMAND
 # =========================
 
-@app.on_callback_query()
+@app.on_message(filters.command("help"))
+async def help_cmd(client, message):
+
+    await message.reply(
+        "Supported sites:\n\n"
+        "YouTube\nInstagram\nTikTok\nFacebook\nTwitter\n\n"
+        "Send a video link."
+    )
+
+
+# =========================
+# PING COMMAND
+# =========================
+
+@app.on_message(filters.command("ping"))
+async def ping(client, message):
+
+    await message.reply("🏓 Bot is online")
+
+
+# =========================
+# QUEUE COMMAND
+# =========================
+
+@app.on_message(filters.command("queue"))
+async def queue_status(client, message):
+
+    size = queue.qsize()
+
+    await message.reply(f"📥 Downloads in queue: {size}")
+
+
+# =========================
+# HELP BUTTON
+# =========================
+
+@app.on_callback_query(filters.regex("help"))
 async def help_button(client, query):
 
-    if query.data == "help":
-
-        await query.message.edit(
-            "Supported sites:\n\n"
-            "YouTube\nInstagram\nTikTok\nFacebook\nTwitter\n\n"
-            "Send any video link."
-        )
+    await query.message.edit(
+        "Supported sites:\n\n"
+        "YouTube\nInstagram\nTikTok\nFacebook\nTwitter\n\n"
+        "Send a video link."
+    )
 
 
 # =========================
@@ -178,9 +211,34 @@ async def link_handler(client, message):
 
     url = message.text.strip()
 
-    await queue.put((url, message))
+    kb = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("🎬 Video", callback_data=f"video|{url}"),
+                InlineKeyboardButton("🎵 Audio", callback_data=f"audio|{url}")
+            ]
+        ]
+    )
 
-    await message.reply("⏳ Added to queue")
+    await message.reply(
+        "Choose download type:",
+        reply_markup=kb
+    )
+
+
+# =========================
+# DOWNLOAD BUTTON
+# =========================
+
+@app.on_callback_query(filters.regex("video|audio"))
+async def download_choice(client, query):
+
+    data = query.data.split("|")
+    url = data[1]
+
+    await query.message.edit("⏳ Added to queue")
+
+    await queue.put((url, query.message))
 
 
 # =========================
@@ -192,11 +250,20 @@ async def main():
     for _ in range(MAX_PARALLEL_DOWNLOADS):
         asyncio.create_task(worker())
 
-    await app.start()
+    try:
+        await app.start()
+        print("BOT RUNNING")
+        await idle()
 
-    print("BOT RUNNING")
+    except FloodWait as e:
+        print(f"FloodWait detected. Sleeping {e.value} seconds")
+        await asyncio.sleep(e.value)
+        await main()
 
-    await idle()
 
+# =========================
+# START BOT
+# =========================
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())
