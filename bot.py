@@ -10,14 +10,13 @@ from pyrogram.errors import FloodWait
 # =========================
 # CONFIG
 # =========================
-
-BOT_TOKEN = "8769882137:AAEanCgyfRU11WKxvO94LBn0KXvOqAPy5B4"
+BOT_TOKEN = "8769882137:AAE9KK344JsfWx4ZXxwXzrwEC4XSrp305f0"
 API_ID = 39058593
 API_HASH = "d78f8a54cf1bff913d24d0b1599723b1"
 
 DOWNLOAD_DIR = "downloads"
 MAX_PARALLEL_DOWNLOADS = 4
-AUTO_DELETE_TIME = 1800
+AUTO_DELETE_TIME = 1800  # 30 minutes
 
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
@@ -33,7 +32,6 @@ queue = asyncio.Queue()
 # =========================
 # PROGRESS BAR
 # =========================
-
 async def progress(current, total, message):
     if total == 0:
         return
@@ -41,7 +39,9 @@ async def progress(current, total, message):
     bar = "█" * int(percent / 5) + "░" * (20 - int(percent / 5))
     text = f"""
 ⬇ Downloading
+
 [{bar}] {percent:.1f} %
+
 {current//1024//1024}MB / {total//1024//1024}MB
 """
     try:
@@ -50,18 +50,16 @@ async def progress(current, total, message):
         pass
 
 # =========================
-# AUTO DELETE
+# AUTO DELETE FILES
 # =========================
-
 async def auto_delete(file):
     await asyncio.sleep(AUTO_DELETE_TIME)
     if os.path.exists(file):
         os.remove(file)
 
 # =========================
-# DOWNLOAD
+# DOWNLOAD FUNCTION
 # =========================
-
 async def download_video(url, msg):
     loop = asyncio.get_event_loop()
     def run():
@@ -70,26 +68,28 @@ async def download_video(url, msg):
                 total = d.get('total_bytes', 0)
                 current = d.get('downloaded_bytes', 0)
                 asyncio.run_coroutine_threadsafe(
-                    progress(current, total, msg),
-                    loop
+                    progress(current, total, msg), loop
                 )
+
         ydl_opts = {
             "outtmpl": f"{DOWNLOAD_DIR}/%(title)s.%(ext)s",
             "quiet": True,
             "retries": 10,
             "fragment_retries": 10,
             "continuedl": True,
-            "progress_hooks": [hook]
+            "progress_hooks": [hook],
+            "format": "bestvideo+bestaudio/best",  # Best quality for video sites
         }
+
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
             return ydl.prepare_filename(info)
+
     return await loop.run_in_executor(None, run)
 
 # =========================
 # WORKER
 # =========================
-
 async def worker():
     while True:
         url, message = await queue.get()
@@ -107,53 +107,43 @@ async def worker():
 # =========================
 # START COMMAND
 # =========================
-
 @app.on_message(filters.command("start"))
 async def start(client, message):
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("Help", callback_data="help")]])
-    await message.reply(
-        "🔥 Premium Downloader Bot\n\nSend any video link.",
-        reply_markup=kb
-    )
+    await message.reply("🔥 Premium Downloader Bot\n\nSend any video link.", reply_markup=kb)
 
 # =========================
 # HELP BUTTON
 # =========================
-
 @app.on_callback_query()
 async def help_button(client, query):
     if query.data == "help":
         await query.message.edit(
-            "Supported sites:\nYouTube, Instagram, TikTok, Facebook, Twitter\nSend any video link."
+            "Supported sites:\n\nYouTube\nInstagram\nTikTok\nFacebook\nX\nPornHub\nXHamster\n\nSend any video link."
         )
 
 # =========================
 # LINK HANDLER
 # =========================
-
-@app.on_message(filters.text & filters.entity("url"))
+@app.on_message(filters.text & filters.regex("http"))
 async def link_handler(client, message):
-    urls = [ent.url for ent in message.entities if ent.type == "url"]
-    for url in urls:
-        await queue.put((url, message))
+    url = message.text.strip()
+    await queue.put((url, message))
     await message.reply("⏳ Added to queue")
 
 # =========================
-# MAIN FUNCTION
+# MAIN
 # =========================
-
 async def main():
+    for _ in range(MAX_PARALLEL_DOWNLOADS):
+        asyncio.create_task(worker())
     try:
         await app.start()
         print("BOT RUNNING")
-        # Start workers AFTER bot is ready
-        for _ in range(MAX_PARALLEL_DOWNLOADS):
-            asyncio.create_task(worker())
         await idle()
     except FloodWait as e:
         print(f"FloodWait detected. Sleeping for {e.value} seconds")
         await asyncio.sleep(e.value)
-        await main()
 
 if __name__ == "__main__":
     asyncio.run(main())
