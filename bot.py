@@ -1,14 +1,14 @@
 print("BOT FILE STARTED")
+
 import os
 import asyncio
 import yt_dlp
-import time
-from pyrogram import Client, filters
+from pyrogram import Client, filters, idle
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# =============================
+# =========================
 # CONFIG
-# =============================
+# =========================
 
 BOT_TOKEN = "8769882137:AAEanCgyfRU11WKxvO94LBn0KXvOqAPy5B4"
 API_ID = 39058593
@@ -16,7 +16,7 @@ API_HASH = "d78f8a54cf1bff913d24d0b1599723b1"
 
 DOWNLOAD_DIR = "downloads"
 MAX_PARALLEL_DOWNLOADS = 4
-AUTO_DELETE_TIME = 1800   # 30 minutes
+AUTO_DELETE_TIME = 1800
 
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
@@ -27,13 +27,16 @@ app = Client(
     bot_token=BOT_TOKEN
 )
 
-download_queue = asyncio.Queue()
+queue = asyncio.Queue()
 
-# =============================
+# =========================
 # PROGRESS BAR
-# =============================
+# =========================
 
 async def progress(current, total, message):
+
+    if total == 0:
+        return
 
     percent = current * 100 / total
 
@@ -42,7 +45,7 @@ async def progress(current, total, message):
     text = f"""
 ⬇ Downloading
 
-[{bar}] {percent:.1f}%
+[{bar}] {percent:.1f} %
 
 {current//1024//1024}MB / {total//1024//1024}MB
 """
@@ -52,9 +55,10 @@ async def progress(current, total, message):
     except:
         pass
 
-# =============================
-# CLEANUP
-# =============================
+
+# =========================
+# AUTO DELETE
+# =========================
 
 async def auto_delete(file):
 
@@ -63,103 +67,130 @@ async def auto_delete(file):
     if os.path.exists(file):
         os.remove(file)
 
-# =============================
-# DOWNLOAD FUNCTION
-# =============================
 
-async def download_worker():
+# =========================
+# DOWNLOAD
+# =========================
+
+async def download_video(url, msg):
+
+    loop = asyncio.get_event_loop()
+
+    def run():
+
+        def hook(d):
+            if d['status'] == 'downloading':
+                total = d.get('total_bytes', 0)
+                current = d.get('downloaded_bytes', 0)
+
+                asyncio.run_coroutine_threadsafe(
+                    progress(current, total, msg),
+                    loop
+                )
+
+        ydl_opts = {
+            "outtmpl": f"{DOWNLOAD_DIR}/%(title)s.%(ext)s",
+            "quiet": True,
+            "retries": 10,
+            "fragment_retries": 10,
+            "continuedl": True,
+            "progress_hooks": [hook]
+        }
+
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+
+            info = ydl.extract_info(url, download=True)
+
+            return ydl.prepare_filename(info)
+
+    return await loop.run_in_executor(None, run)
+
+
+# =========================
+# WORKER
+# =========================
+
+async def worker():
 
     while True:
 
-        url, message = await download_queue.get()
+        url, message = await queue.get()
 
         try:
 
             msg = await message.reply("⬇ Starting download...")
 
-            ydl_opts = {
-                "outtmpl": f"{DOWNLOAD_DIR}/%(title)s.%(ext)s",
-                "retries": 10,
-                "fragment_retries": 10,
-                "continuedl": True,
-                "quiet": True
-            }
-
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-
-                info = ydl.extract_info(url, download=True)
-
-                file = ydl.prepare_filename(info)
+            file = await download_video(url, msg)
 
             await msg.edit("📤 Uploading...")
 
-            sent = await message.reply_document(file)
+            await message.reply_document(file)
 
             asyncio.create_task(auto_delete(file))
 
             await msg.edit("✅ Download completed")
 
-        except Exception as e:
-
+        except Exception:
             await message.reply("❌ Download failed")
 
-        download_queue.task_done()
+        queue.task_done()
 
-# =============================
-# START COMMAND
-# =============================
+
+# =========================
+# START
+# =========================
 
 @app.on_message(filters.command("start"))
-
 async def start(client, message):
 
-    kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("Help", callback_data="help")]
-    ])
+    kb = InlineKeyboardMarkup(
+        [[InlineKeyboardButton("Help", callback_data="help")]]
+    )
 
     await message.reply(
         "🔥 Premium Downloader Bot\n\nSend any video link.",
         reply_markup=kb
     )
 
-# =============================
-# HELP BUTTON
-# =============================
+
+# =========================
+# HELP
+# =========================
 
 @app.on_callback_query()
-
-async def callbacks(client, query):
+async def help_button(client, query):
 
     if query.data == "help":
 
         await query.message.edit(
-            "Send links from:\n\n"
-            "YouTube\nInstagram\nTikTok\nFacebook\nTwitter"
+            "Supported sites:\n\n"
+            "YouTube\nInstagram\nTikTok\nFacebook\nTwitter\n\n"
+            "Send any video link."
         )
 
-# =============================
+
+# =========================
 # LINK HANDLER
-# =============================
+# =========================
 
 @app.on_message(filters.text & filters.regex("http"))
-
 async def link_handler(client, message):
 
     url = message.text.strip()
 
-    await download_queue.put((url, message))
+    await queue.put((url, message))
 
     await message.reply("⏳ Added to queue")
 
-# =============================
-# START WORKERS
-# =============================
+
+# =========================
+# MAIN
+# =========================
 
 async def main():
 
     for _ in range(MAX_PARALLEL_DOWNLOADS):
-
-        asyncio.create_task(download_worker())
+        asyncio.create_task(worker())
 
     await app.start()
 
@@ -167,6 +198,5 @@ async def main():
 
     await idle()
 
-from pyrogram import idle
 
 asyncio.run(main())
